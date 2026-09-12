@@ -121,3 +121,98 @@ def test_unlink_removes_link_only(config, tmp_path):
 def test_link_missing_path_errors(config, tmp_path):
     with pytest.raises(library.LibraryError):
         library.link(config, [tmp_path / "nope"])
+
+
+# -- source folders ----------------------------------------------------
+
+
+def test_source_folder_is_played_in_place(config, tmp_path):
+    album = tmp_path / "album"
+    make_audio(album, "a.mp3")
+    make_audio(album / "disc2", "b.flac")
+    make_audio(album, "cover.jpg")
+
+    library.add_source(config, album)
+    library.invalidate_cache()
+    found = library.entries(config, "music")
+
+    assert sorted(e.name for e in found) == ["a.mp3", "b.flac"]
+    assert all(e.origin == "source" for e in found)
+    assert list(config.music_dir.iterdir()) == []  # nothing was linked in
+
+
+def test_new_files_in_a_source_show_up(config, tmp_path):
+    album = tmp_path / "album"
+    make_audio(album, "a.mp3")
+    library.add_source(config, album)
+    library.invalidate_cache()
+    assert len(library.tracks(config, "music")) == 1
+
+    make_audio(album, "b.mp3")
+    library.invalidate_cache()  # the cache is what a 5s wait would clear
+    assert len(library.tracks(config, "music")) == 2
+
+
+def test_source_and_link_do_not_double_up(config, tmp_path):
+    album = tmp_path / "album"
+    make_audio(album, "song.mp3")
+    library.link(config, [album])
+    library.add_source(config, album)
+    library.invalidate_cache()
+
+    found = library.entries(config, "music")
+    assert [(e.name, e.origin) for e in found] == [("song.mp3", "link")]
+
+
+def test_sources_are_per_section(config, tmp_path):
+    make_audio(tmp_path / "songs", "a.mp3")
+    make_audio(tmp_path / "weather", "rain.ogg")
+    library.add_source(config, tmp_path / "songs")
+    library.add_source(config, tmp_path / "weather", section="ambient")
+    library.invalidate_cache()
+
+    assert [e.name for e in library.entries(config, "music")] == ["a.mp3"]
+    assert [e.name for e in library.entries(config, "ambient")] == ["rain.ogg"]
+
+
+def test_adding_a_source_twice_is_refused(config, tmp_path):
+    album = tmp_path / "album"
+    make_audio(album, "a.mp3")
+    library.add_source(config, album)
+    with pytest.raises(library.LibraryError, match="already"):
+        library.add_source(config, album)
+
+
+def test_a_source_must_be_a_folder(config, tmp_path):
+    song = make_audio(tmp_path / "m", "a.mp3")
+    with pytest.raises(library.LibraryError):
+        library.add_source(config, song)
+    with pytest.raises(library.LibraryError):
+        library.add_source(config, tmp_path / "nowhere")
+
+
+def test_removing_a_source_stops_playing_it(config, tmp_path):
+    album = tmp_path / "album"
+    make_audio(album, "a.mp3")
+    library.add_source(config, album)
+    library.invalidate_cache()
+    assert library.tracks(config, "music")
+
+    library.remove_source(config, album)
+    library.invalidate_cache()
+    assert library.tracks(config, "music") == []
+    assert (album / "a.mp3").exists()  # the folder is untouched
+
+    with pytest.raises(library.LibraryError, match="not a music source"):
+        library.remove_source(config, album)
+
+
+def test_a_missing_source_folder_is_not_fatal(config, tmp_path):
+    album = tmp_path / "album"
+    make_audio(album, "a.mp3")
+    library.add_source(config, album)
+    for entry in album.iterdir():
+        entry.unlink()
+    album.rmdir()
+    library.invalidate_cache()
+    assert library.tracks(config, "music") == []

@@ -1,13 +1,19 @@
-"""The 'custom soundtrack' folder: symlinks in, no duplicated bytes.
+"""Where the music comes from.
 
-Tracks stay wherever they already live (a Steam folder, a NAS mount, an
-external drive). The library only holds symlinks pointing at them, so adding
-a 40 GB collection costs a few kilobytes of directory entries.
+Two ways in, and they mix freely:
+
+* **Linked** - `bgst link` puts a symlink in the 'custom soundtrack' folder,
+  pointing at the file where it already lives. Adding a 40 GB collection
+  costs a few kilobytes of directory entries, and you curate track by track.
+* **Source folders** - a folder played in place. Nothing is added to the
+  library at all; the tree is scanned when it is needed, so anything you drop
+  in there later just shows up.
 """
 
 from __future__ import annotations
 
 import os
+import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +31,20 @@ class LibraryError(Exception):
 class LinkResult:
     linked: list[Path]
     skipped: list[tuple[Path, str]]
+
+
+@dataclass(frozen=True)
+class Entry:
+    """One playable track, and how it got into the library."""
+
+    path: Path       # what the player opens
+    target: Path     # the real file behind it
+    origin: str      # "link" | "source"
+    source: Path | None = None  # the source folder it was found in
+
+    @property
+    def name(self) -> str:
+        return self.path.name
 
 
 def section_dir(config: Config, section: str) -> Path:
@@ -189,20 +209,114 @@ def _is_hard_link(path: Path) -> bool:
         return False
 
 
-def tracks(config: Config, section: str = "music") -> list[Path]:
-    """Playable entries of a section, sorted, broken links dropped."""
+# Source folders are re-scanned on demand; this keeps a 1-second poll from
+# walking a big tree over and over. Mutating the sources clears it.
+_SCAN_TTL = 5.0
+_scan_cache: dict[Path, tuple[float, list[Path]]] = {}
+
+
+def invalidate_cache() -> None:
+    _scan_cache.clear()
+
+
+def scan(directory: Path, ttl: float = _SCAN_TTL) -> list[Path]:
+    """Audio files under `directory`, recursively. Cached briefly."""
+    now = time.monotonic()
+    cached = _scan_cache.get(directory)
+    if cached and now - cached[0] < ttl:
+        return cached[1]
+    found: list[Path] = []
+    if directory.is_dir():
+        for entry in sorted(directory.rglob("*")):
+            if entry.name.startswith("."):
+                continue
+            try:
+                if entry.is_file() and is_audio(entry):
+                    found.append(entry)
+            except OSError:
+                continue
+    _scan_cache[directory] = (now, found)
+    return found
+
+
+def linked_entries(config: Config, section: str = "music") -> list[Entry]:
+    """Symlinks (and hard links) sitting in the library folder."""
     directory = section_dir(config, section)
     if not directory.is_dir():
         return []
     found = []
     for entry in sorted(directory.iterdir(), key=lambda p: p.name.lower()):
-        if entry.is_dir():
-            continue
-        if not entry.exists():  # dangling symlink
+        if entry.is_dir() or not entry.exists():  # dangling link
             continue
         if is_audio(entry):
-            found.append(entry)
+            try:
+                target = entry.resolve()
+            except OSError:
+                continue
+            found.append(Entry(path=entry, target=target, origin="link"))
     return found
+
+
+def entries(config: Config, section: str = "music") -> list[Entry]:
+    """Everything playable in a section: links first, then source folders.
+
+    A file reachable both ways is listed once, as the link - so pointing a
+    source folder at something you already linked does not double it up.
+    """
+    found = linked_entries(config, section)
+    seen = set()
+    for entry in found:
+        try:
+            seen.add(_file_key(entry.target))
+        except OSError:
+            continue
+
+    for source in config.sources(section):
+        for path in scan(source):
+            try:
+                key = _file_key(path)
+            except OSError:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(Entry(path=path, target=path, origin="source", source=source))
+    return found
+
+
+def tracks(config: Config, section: str = "music") -> list[Path]:
+    """Playable files of a section, links and source folders together."""
+    return [entry.path for entry in entries(config, section)]
+
+
+def add_source(config: Config, path: Path, section: str = "music") -> Path:
+    """Play a folder in place, without linking anything out of it."""
+    section_dir(config, section)  # validates the section name
+    directory = Path(path).expanduser()
+    if not directory.is_dir():
+        raise LibraryError(f"not a folder: {directory}")
+    directory = directory.resolve()
+    current = config.sources(section)
+    if directory in current:
+        raise LibraryError(f"already a {section} source: {directory}")
+    config.set_sources(section, current + [directory])
+    invalidate_cache()
+    return directory
+
+
+def remove_source(config: Config, path: Path, section: str = "music") -> Path:
+    section_dir(config, section)
+    directory = Path(path).expanduser()
+    current = config.sources(section)
+    matches = [p for p in current if p == directory or str(p) == str(directory)]
+    if not matches:
+        resolved = directory.resolve() if directory.exists() else directory
+        matches = [p for p in current if p == resolved]
+        if not matches:
+            raise LibraryError(f"not a {section} source: {directory}")
+    config.set_sources(section, [p for p in current if p not in matches])
+    invalidate_cache()
+    return matches[0]
 
 
 def broken(config: Config, section: str = "music") -> list[Path]:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from bgsoundtrack import library, webui
+from bgsoundtrack import library, picker, webui
 from bgsoundtrack.config import Config
 from bgsoundtrack.service import Session
 
@@ -51,8 +51,10 @@ def test_state_reports_library_and_config(server):
     make_audio(config.music_dir, "song.mp3")
     state = request(httpd, "/api/state")
     assert state["running"] is False
-    assert [t["name"] for t in state["library"]["music"]] == ["song.mp3"]
+    assert state["counts"]["music"] == 1
     assert state["config"]["gap_min"] == 1
+    listing = request(httpd, "/api/library?section=music")
+    assert [t["name"] for t in listing["tracks"]] == ["song.mp3"]
 
 
 def test_config_post_persists_to_disk(server):
@@ -79,7 +81,7 @@ def test_link_and_unlink_through_the_api(server):
     assert source.exists()
 
     state = request(httpd, "/api/unlink", {"name": "theme.mp3", "section": "music"})
-    assert state["library"]["music"] == []
+    assert state["counts"]["music"] == 0
     assert source.exists()  # the original is untouched
 
 
@@ -127,3 +129,49 @@ def test_static_refuses_paths_outside_the_ui_folder(server):
     with pytest.raises(urllib.error.HTTPError) as caught:
         request(httpd, "/../config.py")
     assert caught.value.code == 404
+
+
+# -- source folders through the API ------------------------------------
+
+
+def test_source_add_and_remove_through_the_api(server, tmp_path):
+    httpd, _, config, _ = server
+    album = tmp_path / "album"
+    make_audio(album, "a.mp3")
+
+    state = request(httpd, "/api/source", {"path": str(album), "section": "music"})
+    assert state["sources"]["music"][0]["path"] == str(album.resolve())
+    assert state["sources"]["music"][0]["count"] == 1
+    assert state["counts"]["music"] == 1
+    assert list(config.music_dir.iterdir()) == []  # played in place, not linked
+
+    listing = request(httpd, "/api/library?section=music")
+    assert listing["tracks"][0]["origin"] == "source"
+
+    state = request(httpd, "/api/source", {"path": str(album), "remove": True})
+    assert state["sources"]["music"] == []
+    assert (album / "a.mp3").exists()
+
+
+def test_source_needs_a_real_folder(server, tmp_path):
+    httpd, *_ = server
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        request(httpd, "/api/source", {"path": str(tmp_path / "nope")})
+    assert caught.value.code == 400
+
+
+def test_library_route_rejects_unknown_sections(server):
+    httpd, *_ = server
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        request(httpd, "/api/library?section=sfx")
+    assert caught.value.code == 400
+
+
+def test_pick_reports_when_no_chooser_is_available(server, monkeypatch):
+    httpd, session, *_ = server
+    monkeypatch.setattr(
+        webui.Session, "pick",
+        lambda self, kind="folder", title="": picker.PickResult([], False, "no Tk here"),
+    )
+    result = request(httpd, "/api/pick", {"kind": "folder"})
+    assert result == {"paths": [], "available": False, "reason": "no Tk here"}

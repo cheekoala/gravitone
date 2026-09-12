@@ -7,10 +7,12 @@ Point it at music you already have, and it plays a shuffled soundtrack behind
 whatever game you're in — with a random gap after each song that is either
 silence or a bed of ambience (wind, rain, tavern noise, crickets).
 
-- **A `custom soundtrack` folder built from symlinks.** `bgst link` points the
-  library at files where they already live, so a 40 GB collection costs a few
-  KB of directory entries. Nothing is copied, nothing is doubled.
-- **A separate `ambient` folder** for loops and atmosphere.
+- **Two ways in, mixed freely.** *Link* a file and a symlink lands in your
+  `custom soundtrack` folder, pointing at where it already lives — a 40 GB
+  collection costs a few KB of directory entries. Or set a whole folder as a
+  **source** and it plays in place, picking up whatever you drop in later.
+  Nothing is ever copied.
+- **A separate `ambient` folder and ambient sources** for loops and atmosphere.
 - **Random gaps with sane defaults** — 12–45 s, 65 % of them ambient, the rest
   silence — all tunable.
 - **A tiny control panel** (`bgst ui`) that runs in your browser, or on your
@@ -61,12 +63,19 @@ installers offer to fetch one. Check any time with `bgst doctor`.
 bgst ui                                    # the control panel, in your browser
 ```
 
+`bgst ui` starts the server *and* opens the page. Opening
+`bgsoundtrack/ui/index.html` from the folder by hand gives you a dead page —
+it has no server to talk to, so no library, no file browser, no playback. The
+page says so if you land there.
+
 Or from the terminal:
 
 ```sh
-bgst init                                  # create the custom soundtrack folder
-bgst link ~/Music/Nier ~/Music/Outer\ Wilds   # symlink music in (folders recurse)
-bgst link --ambient ~/Sounds/rain.ogg ~/Sounds/wind.flac
+bgst init                                    # create the custom soundtrack folder
+bgst source add ~/Music/Soundtracks          # play a whole folder in place
+bgst source add --ambient ~/Sounds/weather
+bgst link ~/Music/Nier ~/Music/Outer\ Wilds  # or link track by track
+bgst link --ambient ~/Sounds/rain.ogg
 bgst play
 ```
 
@@ -87,14 +96,20 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 
 | | |
 | --- | --- |
-| ![Library](docs/ui-library.png) | ![Settings](docs/ui-settings.png) |
+| ![The music library, mixing linked tracks with one from a source folder](docs/ui-library.png) | ![Settings, including source folders](docs/ui-settings.png) |
+| ![Adding files: link them, or play a folder in place](docs/ui-add.png) | |
 
 - **Now** — what is playing or how long the current gap runs, with history.
 - **Music / Ambient** — the two libraries; `✕` removes a link, never a file.
-- **Add** — a built-in file browser (a browser's file picker can't hand over
-  real paths, which symlinking needs). Pick a folder, hit *Link all*.
-- **Config** — gaps, levels, shuffle and loop. Changes save immediately and
-  take effect from the next gap; no need to restart playback.
+- **Add** — *Choose a folder…* opens your desktop's own folder dialog (needs
+  Tk; `bgst doctor` says whether you have it). Otherwise browse from the
+  built-in file browser or paste a path — a web file picker hands over file
+  *contents*, never paths, and paths are what linking needs. Every folder row
+  offers both **Link all** (symlinks each file) and **Source** (play the
+  folder in place).
+- **Config** — gaps, levels, shuffle, loop, and your source folders (with
+  their track counts). Changes save immediately and take effect from the next
+  gap; no need to restart playback.
 
 Keys: `space` play/stop, `n` next. Every API call needs the token in the URL,
 so another page in your browser cannot drive your player or read your disk.
@@ -114,6 +129,21 @@ trust.
 custom soundtrack/
 ├── music/      symlinks -> your songs, wherever they live
 └── ambient/    symlinks -> your ambience
+
+plus any source folders, played where they stand
+```
+
+**Linked** files are curated one by one and stay put even if you reorganise
+the original folder later. **Source folders** are the low-effort option: point
+at `~/Music/Soundtracks`, and every audio file under it plays, including
+whatever you add next week. A file reachable both ways is only played once.
+
+```sh
+bgst source add ~/Music/Soundtracks      # music source
+bgst source add --ambient ~/Sounds       # ambience source
+bgst source list                         # with per-folder track counts
+bgst source remove ~/Music/Soundtracks   # the folder itself is untouched
+bgst ui --pick                           # pick a music source from a dialog
 ```
 
 Because entries are plain symlinks, you can also manage the folder by hand —
@@ -125,6 +155,7 @@ one to drop a track. The player ignores non-audio files and dangling links.
 | `bgst ui` | open the control panel (`--host 0.0.0.0` for a phone remote) |
 | `bgst play` | play in the terminal (`n` next, `q` quit) |
 | `bgst link PATH...` | symlink files/folders in (`--ambient`, `--no-recursive`, `--relative`) |
+| `bgst source add\|remove\|list` | play whole folders in place (`--ambient`) |
 | `bgst unlink NAME...` | remove entries (only ever deletes symlinks, never real files) |
 | `bgst list --targets` | show the library and what each link points at |
 | `bgst prune` | drop links whose target moved or was deleted |
@@ -178,6 +209,7 @@ them per command — handy for a separate library per game.
 | Windows 10/11 | `install.ps1` |
 | Playback | ffplay, mpv, afplay or vlc — whichever is installed |
 | Runtime | Python 3.9+, standard library only |
+| File chooser | your desktop's own, when Tk is installed; a built-in browser otherwise |
 | UI | any browser, including a phone on the same network |
 
 ## Tests

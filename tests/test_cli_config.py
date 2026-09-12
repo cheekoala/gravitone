@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -103,3 +104,65 @@ def test_cli_prune_removes_broken_links(env, tmp_path, capsys):
     capsys.readouterr()
     assert main(["prune"]) == 0
     assert "1 broken link(s) removed" in capsys.readouterr().out
+
+
+# -- source folders ----------------------------------------------------
+
+
+def test_sources_round_trip_through_the_config_file(env, tmp_path):
+    cfg = Config()
+    config_module.set_value(cfg, "music_sources", f"{tmp_path / 'a'}{os.pathsep}{tmp_path / 'b'}")
+    config_module.save(cfg)
+    loaded = config_module.load()
+    assert loaded.sources("music") == [tmp_path / "a", tmp_path / "b"]
+    assert loaded.sources("ambient") == []
+
+
+def test_cli_source_add_list_remove(env, tmp_path, capsys):
+    album = tmp_path / "album"
+    album.mkdir()
+    (album / "a.mp3").write_bytes(b"\0")
+
+    assert main(["source", "add", str(album)]) == 0
+    assert config_module.load().music_sources == [str(album.resolve())]
+    assert main(["source", "add", "--ambient", str(album)]) == 0
+    capsys.readouterr()
+
+    assert main(["source", "list"]) == 0
+    out = capsys.readouterr().out
+    assert "music sources (1)" in out and "ambient sources (1)" in out
+
+    assert main(["source", "remove", str(album)]) == 0
+    assert config_module.load().music_sources == []
+    assert (album / "a.mp3").exists()
+
+
+def test_cli_list_marks_source_tracks(env, tmp_path, capsys):
+    album = tmp_path / "album"
+    album.mkdir()
+    (album / "a.mp3").write_bytes(b"\0")
+    main(["init"])
+    main(["source", "add", str(album)])
+    capsys.readouterr()
+    assert main(["list", "--music"]) == 0
+    assert "a.mp3  (source)" in capsys.readouterr().out
+
+
+def test_picker_reports_unavailable_without_tk(monkeypatch):
+    from bgsoundtrack import picker
+
+    monkeypatch.setattr(picker.subprocess, "run", _no_tk)
+    result = picker.pick("folder")
+    assert result.available is False and result.paths == []
+
+    with pytest.raises(ValueError):
+        picker.pick("everything")
+
+
+def _no_tk(*args, **kwargs):
+    class Done:
+        returncode = 1
+        stdout = ""
+        stderr = "ModuleNotFoundError: No module named 'tkinter'"
+
+    return Done()

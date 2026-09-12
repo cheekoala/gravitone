@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bgsoundtrack import config as config_module, engine, library, player
+from bgsoundtrack import config as config_module, engine, library, picker, player
 from bgsoundtrack.config import Config
 
 
@@ -41,6 +41,7 @@ class Session:
         self._error: str | None = None
         self._history: list[str] = []
         self._backend: player.Backend | None = None
+        self._picker_available: bool | None = None
 
     # -- state -----------------------------------------------------------
 
@@ -50,12 +51,14 @@ class Session:
         return thread is not None and thread.is_alive()
 
     def snapshot(self) -> dict:
+        """Small enough to poll once a second; track lists live in library()."""
         now = self._now
         return {
             "running": self.running,
             "error": self._error,
             "backend": self._backend.name if self._backend else None,
             "players": player.available(),
+            "picker": self.picker_available,
             "history": list(self._history[-12:]),
             "now": None
             if now is None
@@ -66,21 +69,55 @@ class Session:
                 "elapsed": round(now.elapsed(), 2),
             },
             "config": self.config.to_dict(),
-            "library": {
-                section: [
-                    {
-                        "name": entry.name,
-                        "target": str(entry.resolve()),
-                    }
-                    for entry in library.tracks(self.config, section)
-                ]
+            "counts": {
+                section: len(library.entries(self.config, section))
                 for section in library.SECTIONS
             },
             "broken": {
                 section: [entry.name for entry in library.broken(self.config, section)]
                 for section in library.SECTIONS
             },
+            "sources": {
+                section: self.sources(section) for section in library.SECTIONS
+            },
         }
+
+    def library(self, section: str) -> dict:
+        """The full track list of one section - fetched on demand."""
+        found = library.entries(self.config, section)
+        return {
+            "section": section,
+            "tracks": [
+                {
+                    "name": entry.name,
+                    "target": str(entry.target),
+                    "origin": entry.origin,
+                    "source": str(entry.source) if entry.source else None,
+                }
+                for entry in found
+            ],
+            "broken": [entry.name for entry in library.broken(self.config, section)],
+        }
+
+    def sources(self, section: str) -> list[dict]:
+        listed = []
+        for directory in self.config.sources(section):
+            exists = directory.is_dir()
+            listed.append(
+                {
+                    "path": str(directory),
+                    "exists": exists,
+                    "count": len(library.scan(directory)) if exists else 0,
+                }
+            )
+        return listed
+
+    @property
+    def picker_available(self) -> bool:
+        """Whether this machine can show a native file chooser (probed once)."""
+        if self._picker_available is None:
+            self._picker_available = picker.available()
+        return self._picker_available
 
     # -- transport -------------------------------------------------------
 
@@ -184,3 +221,16 @@ class Session:
 
     def prune(self) -> list[str]:
         return [p.name for p in library.prune(self.config)]
+
+    def add_source(self, path: str, section: str = "music") -> str:
+        added = library.add_source(self.config, Path(path), section=section)
+        config_module.save(self.config, self.config_path)
+        return str(added)
+
+    def remove_source(self, path: str, section: str = "music") -> str:
+        removed = library.remove_source(self.config, Path(path), section=section)
+        config_module.save(self.config, self.config_path)
+        return str(removed)
+
+    def pick(self, kind: str = "folder", title: str = "Choose a folder") -> picker.PickResult:
+        return picker.pick(kind, title)

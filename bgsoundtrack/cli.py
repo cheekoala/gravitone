@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import signal
 import sys
@@ -69,17 +70,46 @@ def cmd_unlink(args) -> int:
     return 0
 
 
+def cmd_source(args) -> int:
+    """Play a folder in place, instead of linking its files one by one."""
+    config = _load_config(args)
+    path = Path(args.config).expanduser() if args.config else None
+    section = "ambient" if getattr(args, "ambient", False) else "music"
+
+    if args.action == "list":
+        for name in ("music", "ambient"):
+            folders = config.sources(name)
+            print(f"{name} sources ({len(folders)}):")
+            for folder in folders:
+                mark = "" if folder.is_dir() else "  MISSING"
+                print(f"  {folder}  [{len(library.scan(folder))} audio]{mark}")
+            print()
+        return 0
+
+    for target in args.paths:
+        if args.action == "add":
+            added = library.add_source(config, Path(target), section=section)
+            print(f"added {section} source {added} "
+                  f"({len(library.scan(added))} audio files)")
+        else:
+            removed = library.remove_source(config, Path(target), section=section)
+            print(f"removed {section} source {removed}")
+    config_module.save(config, path)
+    return 0
+
+
 def cmd_list(args) -> int:
     config = _load_config(args)
     sections = ("ambient",) if args.ambient else ("music",) if args.music else library.SECTIONS
     for section in sections:
-        entries = library.tracks(config, section)
+        entries = library.entries(config, section)
         print(f"{section} ({len(entries)}):")
         for entry in entries:
-            if args.targets and entry.is_symlink():
-                print(f"  {entry.name} -> {entry.resolve()}")
+            tag = "" if entry.origin == "link" else "  (source)"
+            if args.targets:
+                print(f"  {entry.name} -> {entry.target}{tag}")
             else:
-                print(f"  {entry.name}")
+                print(f"  {entry.name}{tag}")
         for entry in library.broken(config, section):
             print(f"  {entry.name} -> BROKEN", file=sys.stderr)
         print()
@@ -129,11 +159,29 @@ def cmd_doctor(args) -> int:
     print(f"root            {config.root_path}")
     print(f"root exists     {config.root_path.is_dir()}")
     for section in library.SECTIONS:
-        entries = library.tracks(config, section)
+        entries = library.entries(config, section)
+        linked = sum(1 for entry in entries if entry.origin == "link")
         bad = library.broken(config, section)
-        print(f"{section:15} {len(entries)} playable, {len(bad)} broken link(s)")
+        print(
+            f"{section:15} {len(entries)} playable "
+            f"({linked} linked, {len(entries) - linked} from sources), "
+            f"{len(bad)} broken link(s)"
+        )
+    for section in library.SECTIONS:
+        for folder in config.sources(section):
+            state = "ok" if folder.is_dir() else "MISSING"
+            print(f"{section[:7]} source  {folder} [{state}]")
+    from bgsoundtrack import picker
+
     found = player.available()
     print(f"players found   {', '.join(found) if found else 'NONE'}")
+    chooser = picker.available()
+    print(f"file chooser    {'yes' if chooser else 'no (Tk missing or no display)'}")
+    if not chooser:
+        print(
+            "                the UI falls back to its own file browser; "
+            "for the system dialog install Tk (Debian/Ubuntu: sudo apt install python3-tk)"
+        )
     if not found:
         print(
             "\nInstall ffmpeg (for ffplay), mpv, or vlc to play audio.",
@@ -192,6 +240,9 @@ def _key_listener(controls: engine.Controls) -> None:
 def cmd_ui(args) -> int:
     from bgsoundtrack import webui
 
+    if args.pick:
+        return _pick_source(args)
+
     return webui.run(
         config_path=Path(args.config).expanduser() if args.config else None,
         host=args.host,
@@ -199,6 +250,24 @@ def cmd_ui(args) -> int:
         open_browser=not args.no_browser,
         root=str(Path(args.root).expanduser()) if args.root else None,
     )
+
+
+def _pick_source(args) -> int:
+    from bgsoundtrack import picker
+
+    config = _load_config(args)
+    result = picker.pick("folder", "Choose a music folder for bgst")
+    if not result.available:
+        print(f"no system file chooser here ({result.reason})", file=sys.stderr)
+        print("use 'bgst source add PATH' instead", file=sys.stderr)
+        return 1
+    if not result.paths:
+        print("nothing picked")
+        return 0
+    added = library.add_source(config, Path(result.paths[0]))
+    config_module.save(config, Path(args.config).expanduser() if args.config else None)
+    print(f"added music source {added}")
+    return 0
 
 
 def cmd_play(args) -> int:
@@ -271,6 +340,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ambient", action="store_true")
     p.set_defaults(func=cmd_unlink)
 
+    p = sub.add_parser(
+        "source",
+        help="play whole folders in place (no symlinks, picked up as they change)",
+    )
+    source_actions = p.add_subparsers(dest="action", required=True)
+    for action, blurb in (("add", "start playing a folder"), ("remove", "stop playing it")):
+        sp = source_actions.add_parser(action, help=blurb)
+        sp.add_argument("paths", nargs="+", metavar="PATH")
+        sp.add_argument("--ambient", action="store_true", help="an ambience source")
+        sp.set_defaults(func=cmd_source)
+    sp = source_actions.add_parser("list", help="show the source folders")
+    sp.set_defaults(func=cmd_source)
+
     p = sub.add_parser("list", help="show the library")
     p.add_argument("--music", action="store_true")
     p.add_argument("--ambient", action="store_true")
@@ -288,6 +370,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("ui", help="open the little control panel in a browser")
+    p.add_argument(
+        "--pick",
+        action="store_true",
+        help="open the system folder chooser to add a source, then exit",
+    )
     p.add_argument("--port", type=int, default=8765)
     p.add_argument(
         "--host",
@@ -329,3 +416,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except KeyboardInterrupt:
         return 130
+    except BrokenPipeError:
+        # `bgst list | head` closes the pipe on us; exit quietly like `ls` does.
+        try:
+            sys.stdout.close()
+        finally:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), 1)
+        return 0

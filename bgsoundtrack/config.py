@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 MUSIC_DIRNAME = "music"
@@ -71,6 +71,12 @@ class Config:
     ambient_volume: int = 45
     loop: bool = True
 
+    # Folders played in place. An alternative to linking: nothing is added to
+    # the library folder, the tree is simply scanned every time it is needed,
+    # so whatever you drop in there later is picked up on the next pass.
+    music_sources: list = field(default_factory=list)
+    ambient_sources: list = field(default_factory=list)
+
     def __post_init__(self) -> None:
         if not self.root:
             self.root = str(default_root())
@@ -87,6 +93,17 @@ class Config:
     def ambient_dir(self) -> Path:
         return self.root_path / AMBIENT_DIRNAME
 
+    def sources(self, section: str) -> list[Path]:
+        names = self.music_sources if section == "music" else self.ambient_sources
+        return [Path(name).expanduser() for name in names]
+
+    def set_sources(self, section: str, paths: list) -> None:
+        values = [str(Path(p).expanduser()) for p in paths]
+        if section == "music":
+            self.music_sources = values
+        else:
+            self.ambient_sources = values
+
     def validate(self) -> None:
         if self.gap_min < 0:
             raise ValueError("gap_min must be >= 0")
@@ -98,6 +115,9 @@ class Config:
             value = getattr(self, name)
             if not 0 <= value <= 100:
                 raise ValueError(f"{name} must be between 0 and 100")
+        for name in ("music_sources", "ambient_sources"):
+            if not isinstance(getattr(self, name), list):
+                raise ValueError(f"{name} must be a list of folders")
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -109,6 +129,13 @@ _FIELD_TYPES = {f.name: f.type for f in fields(Config)}
 def _coerce(name: str, value):
     """Turn a string (from the CLI or a hand-edited config) into the field type."""
     kind = _FIELD_TYPES[name]
+    if kind == "list":
+        if isinstance(value, (list, tuple)):
+            return [str(item) for item in value]
+        text = str(value).strip()
+        if not text:
+            return []
+        return [part for part in text.split(os.pathsep) if part]
     if kind == "bool":
         if isinstance(value, bool):
             return value

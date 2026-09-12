@@ -27,6 +27,12 @@
     </div>
   </header>
 
+  <div class="offline" id="offline" hidden>
+    <strong>This page needs the bgst server.</strong>
+    <span id="offline-detail">Start it with <code>bgst ui</code> — it opens the working page for you.
+    Opening <code>index.html</code> straight from the folder cannot reach your files.</span>
+  </div>
+
   <div class="body">
     <nav class="rail" role="tablist" aria-label="Sections">
       <button class="rail-btn active" data-panel="now" title="Now playing" role="tab">
@@ -110,7 +116,20 @@
             <button class="seg-btn" data-section="ambient">Ambient</button>
           </div>
         </div>
-        <p class="hint">Files are <strong>symlinked</strong>, never copied — your library costs no extra disk.</p>
+        <p class="hint">
+          <strong>Link</strong> copies nothing — it drops a symlink in your library, track by track.
+          <strong>Source</strong> plays a whole folder where it stands and picks up anything you add to it later.
+        </p>
+        <div class="add-tools">
+          <button class="ghost small" id="pick-folder">
+            <svg viewBox="0 0 24 24" class="icon"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            Choose a folder…
+          </button>
+          <form class="path-form" id="path-form">
+            <input type="text" id="path-input" placeholder="…or paste a path" spellcheck="false" autocomplete="off">
+            <button class="ghost small" type="submit">Go</button>
+          </form>
+        </div>
         <div class="shortcuts" id="shortcuts"></div>
         <div class="crumb" id="crumb"></div>
         <ul class="browser" id="browser"></ul>
@@ -134,6 +153,14 @@
             <input type="range" id="volume" min="0" max="100" step="1"><output id="volume-out"></output></label>
           <label class="field"><span>Ambience volume</span>
             <input type="range" id="ambient_volume" min="0" max="100" step="1"><output id="ambient_volume-out"></output></label>
+        </div>
+        <div class="card">
+          <div class="kicker">Source folders</div>
+          <p class="hint">Played in place, nothing linked. New files in these folders join the rotation by themselves.</p>
+          <ul class="sources" id="sources-list"></ul>
+          <div class="row-actions">
+            <button class="ghost small" data-goto="add">Add a folder</button>
+          </div>
         </div>
         <div class="card">
           <div class="kicker">Playback</div>

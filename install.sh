@@ -114,6 +114,21 @@ else
   fi
 fi
 
+# -- optional: Tk, for the system file chooser in the UI -------------------
+if ! "$PYTHON" -c 'import tkinter' >/dev/null 2>&1; then
+  case "$(uname -s)" in
+    Linux)
+      say ""
+      say "Optional: Tk is missing, so the UI will use its own file browser"
+      say "instead of your desktop's folder chooser. Install it with e.g."
+      if command -v apt-get >/dev/null 2>&1; then say "    ${DIM}sudo apt-get install python3-tk${OFF}"
+      elif command -v dnf >/dev/null 2>&1; then say "    ${DIM}sudo dnf install python3-tkinter${OFF}"
+      elif command -v pacman >/dev/null 2>&1; then say "    ${DIM}sudo pacman -S tk${OFF}"
+      fi
+      ;;
+  esac
+fi
+
 # -- desktop entry (Linux) -------------------------------------------------
 if [ "$(uname -s)" = "Linux" ] && [ -f "$SRC/packaging/bgst.desktop" ]; then
   APPS="$HOME/.local/share/applications"
@@ -134,6 +149,12 @@ esac
 
 say ""
 step "Done"
+if [ -t 0 ]; then
+  printf 'Open the control panel now? [Y/n] '
+  read -r reply
+  case "$reply" in [nN]*) ;; *) "$BIN/$APP" ui & sleep 1 ;; esac
+fi
+say ""
 say "  ${BOLD}bgst ui${OFF}                     open the control panel"
 say "  ${BOLD}bgst link ~/Music/album${OFF}     add music (symlinks, no copies)"
 say "  ${BOLD}bgst play${OFF}                   play from the terminal"

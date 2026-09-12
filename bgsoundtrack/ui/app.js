@@ -4,6 +4,8 @@
 
   const TOKEN = location.hash.slice(1) || sessionStorage.getItem("bgst-token") || "";
   if (TOKEN) sessionStorage.setItem("bgst-token", TOKEN);
+  // Opened as a file:// page there is no server to talk to, and no token.
+  const SERVED = location.protocol === "http:" || location.protocol === "https:";
 
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => {
@@ -14,12 +16,15 @@
   };
 
   let state = null;
+  let panel = "now";
   let section = "music";      // which library the Add panel targets
   let browsePath = null;
   let toastTimer = null;
+  const libraries = { music: null, ambient: null };
 
   // -- server ---------------------------------------------------------
   async function api(route, body) {
+    if (!SERVED) throw new Error("not served by bgst");
     const res = await fetch(`/api/${route}`, {
       method: body === undefined ? "GET" : "POST",
       headers: { "X-BGST-Token": TOKEN, "Content-Type": "application/json" },
@@ -36,7 +41,12 @@
     node.classList.toggle("bad", !!bad);
     node.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { node.hidden = true; }, 3200);
+    toastTimer = setTimeout(() => { node.hidden = true; }, 3600);
+  }
+
+  function offline(detail) {
+    $("offline").hidden = false;
+    if (detail) $("offline-detail").textContent = detail;
   }
 
   async function call(route, body) {
@@ -74,9 +84,8 @@
     $("transport-label").textContent = running ? "Live" : "Play";
     $("skip").disabled = !running;
 
-    // now playing
-    const panel = $("panel-now");
-    panel.classList.toggle("is-gap", !!now && now.kind !== "track");
+    const nowPanel = $("panel-now");
+    nowPanel.classList.toggle("is-gap", !!now && now.kind !== "track");
     const kinds = { track: "Now playing", ambient: "Ambience", silence: "Silence" };
     $("now-kind").textContent = now ? kinds[now.kind] : (running ? "Starting" : "Idle");
     $("now-title").textContent = now
@@ -97,39 +106,55 @@
     if (!seen.length) history.append(el("li", "empty", "Nothing yet"));
     seen.forEach((name) => history.append(el("li", null, name)));
 
-    renderLibrary("music", next);
-    renderLibrary("ambient", next);
+    $("music-count").textContent = String(next.counts.music);
+    $("ambient-count").textContent = String(next.counts.ambient);
+    renderLibrary("music");
+    renderLibrary("ambient");
+    renderSources(next);
+
     if (!document.activeElement || document.activeElement.type !== "range") syncSettings(config);
 
     const players = next.players.length ? next.players.join(", ") : "none found";
-    $("backend-note").textContent = `Players available: ${players}. ` +
-      (next.players.length ? "" : "Install ffmpeg, mpv or vlc to hear anything.");
-    if (next.error) $("backend-note").textContent += ` — ${next.error}`;
+    let note = `Players available: ${players}. ` +
+      (next.players.length ? "" : "Install ffmpeg, mpv or vlc to hear anything. ");
+    if (!next.picker) note += "No system file chooser here — use the built-in browser or paste a path. ";
+    if (next.error) note += `— ${next.error}`;
+    $("backend-note").textContent = note;
+    $("pick-folder").hidden = !next.picker;
   }
 
-  function renderLibrary(name, next) {
+  function renderLibrary(name) {
     const list = $(`${name}-list`);
-    const items = next.library[name];
-    const broken = next.broken[name];
-    $(`${name}-count`).textContent = String(items.length);
+    const data = libraries[name];
+    if (!data) return;                       // not fetched yet
+    const broken = data.broken || [];
     list.replaceChildren();
 
-    if (!items.length && !broken.length) {
+    if (!data.tracks.length && !broken.length) {
       list.append(el("li", "empty", name === "music"
-        ? "No music yet — open Add and link a folder."
-        : "No ambience yet — link rain, wind or room tone."));
+        ? "No music yet — open Add, then link files or add a source folder."
+        : "No ambience yet — rain, wind, room tone, a distant tavern."));
       return;
     }
 
-    const playing = next.now && next.now.name;
-    items.forEach((entry) => {
-      const row = el("li", entry.name === playing && next.running ? "playing" : null);
+    const playing = state && state.now && state.now.name;
+    data.tracks.forEach((track) => {
+      const row = el("li", track.name === playing && state.running ? "playing" : null);
       const body = el("div", "t-body");
-      body.append(el("div", "t-name", entry.name), el("div", "t-target", shortPath(entry.target)));
-      const remove = el("button", "t-remove", "✕");
-      remove.title = `Unlink ${entry.name}`;
-      remove.addEventListener("click", () => call("unlink", { name: entry.name, section: name }));
-      row.append(body, remove);
+      body.append(el("div", "t-name", track.name), el("div", "t-target", shortPath(track.target)));
+      row.append(body);
+      if (track.origin === "source") {
+        // It is not in the library folder, so there is no link to remove;
+        // the source folder itself is dropped from Config.
+        const tag = el("span", "tag source", "source");
+        tag.title = `From the source folder ${track.source}`;
+        row.append(tag);
+      } else {
+        const remove = el("button", "t-remove", "✕");
+        remove.title = `Unlink ${track.name}`;
+        remove.addEventListener("click", () => unlink(track.name, name));
+        row.append(remove);
+      }
       list.append(row);
     });
     broken.forEach((brokenName) => {
@@ -137,6 +162,34 @@
       const body = el("div", "t-body");
       body.append(el("div", "t-name", brokenName), el("div", "t-target", "target missing"));
       row.append(body);
+      list.append(row);
+    });
+  }
+
+  function renderSources(next) {
+    const list = $("sources-list");
+    list.replaceChildren();
+    const all = [
+      ...next.sources.music.map((s) => ({ ...s, section: "music" })),
+      ...next.sources.ambient.map((s) => ({ ...s, section: "ambient" })),
+    ];
+    if (!all.length) {
+      list.append(el("li", "empty", "No source folders — everything is linked."));
+      return;
+    }
+    all.forEach((source) => {
+      const row = el("li", source.exists ? null : "missing");
+      const path = el("div", "s-path", shortPath(source.path, 46));
+      path.title = source.path;
+      const meta = el("span", "s-meta", source.exists ? `${source.count} audio` : "missing");
+      const tag = el("span", `tag${source.section === "ambient" ? " source" : ""}`, source.section);
+      const remove = el("button", "t-remove", "✕");
+      remove.title = `Stop playing ${source.path}`;
+      remove.addEventListener("click", async () => {
+        const done = await call("source", { path: source.path, section: source.section, remove: true });
+        if (done) { invalidate(); toast(`Removed source ${source.path}`); }
+      });
+      row.append(path, meta, tag, remove);
       list.append(row);
     });
   }
@@ -159,18 +212,40 @@
     $("loop").checked = config.loop;
   }
 
+  // -- libraries (fetched on demand, not in every poll) ----------------
+  async function loadLibrary(name) {
+    try {
+      libraries[name] = await api(`library?section=${name}`);
+      renderLibrary(name);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
+  function invalidate() {
+    libraries.music = null;
+    libraries.ambient = null;
+    if (panel === "music" || panel === "ambient") loadLibrary(panel);
+  }
+
+  async function unlink(name, sectionName) {
+    const done = await call("unlink", { name, section: sectionName });
+    if (done) { invalidate(); toast(`Unlinked ${name}`); }
+  }
+
   // -- add panel ------------------------------------------------------
   async function browse(path) {
     let data;
     try {
       data = await api(`browse${path ? `?path=${encodeURIComponent(path)}` : ""}`);
     } catch (err) {
-      toast(err.message, true);
+      $("browser").replaceChildren(el("li", "empty", err.message));
       return;
     }
     browsePath = data.path;
     $("crumb").textContent = data.path;
     $("crumb").title = data.path;
+    $("path-input").value = "";
 
     const shortcuts = $("shortcuts");
     shortcuts.replaceChildren();
@@ -182,18 +257,7 @@
 
     const list = $("browser");
     list.replaceChildren();
-
-    const linkHere = el("li");
-    linkHere.append(el("div", "t-body"));
-    linkHere.firstChild.append(
-      el("div", "t-name", `Link this folder to ${section}`),
-      el("div", "t-target", shortPath(data.path))
-    );
-    const addAll = el("button", "add", "Link all");
-    addAll.addEventListener("click", (event) => { event.stopPropagation(); link(data.path); });
-    linkHere.append(addAll);
-    linkHere.addEventListener("click", () => link(data.path));
-    list.append(linkHere);
+    list.append(folderRow(`This folder → ${section}`, data.path, true));
 
     if (data.parent) {
       const up = el("li");
@@ -202,11 +266,8 @@
       list.append(up);
     }
     data.dirs.forEach((dir) => {
-      const row = el("li");
-      const body = el("div", "t-body");
-      body.append(el("div", "t-name", `📁 ${dir.name}`));
-      row.append(body);
-      if (dir.audio) row.append(el("span", "badge", `${dir.audio} audio`));
+      const row = folderRow(`📁 ${dir.name}`, dir.path, false);
+      if (dir.audio) row.insertBefore(el("span", "badge", `${dir.audio} audio`), row.lastChild);
       row.addEventListener("click", () => browse(dir.path));
       list.append(row);
     });
@@ -219,47 +280,103 @@
       row.append(body, add);
       list.append(row);
     });
-    if (!data.dirs.length && !data.files.length) list.append(el("li", "empty", "Nothing here"));
+    if (!data.dirs.length && !data.files.length) list.append(el("li", "empty", "No folders or audio here"));
+  }
+
+  function folderRow(label, path, showPath) {
+    const row = el("li");
+    const body = el("div", "t-body");
+    body.append(el("div", "t-name", label));
+    if (showPath) body.append(el("div", "t-target", shortPath(path)));
+    const buttons = el("div", "row-buttons");
+
+    const linkButton = el("button", "add", "Link all");
+    linkButton.title = "Symlink every audio file in here into the library";
+    linkButton.addEventListener("click", (event) => { event.stopPropagation(); link(path); });
+
+    const sourceButton = el("button", "source-btn", "Source");
+    sourceButton.title = "Play this folder in place, including anything added later";
+    sourceButton.addEventListener("click", (event) => { event.stopPropagation(); addSource(path); });
+
+    buttons.append(linkButton, sourceButton);
+    row.append(body, buttons);
+    return row;
   }
 
   async function link(path) {
     const next = await call("link", { path, section });
     if (!next) return;
+    invalidate();
     const { linked, skipped } = next.result;
     toast(linked.length
       ? `Linked ${linked.length} into ${section}${skipped.length ? `, ${skipped.length} skipped` : ""}`
       : `Nothing linked${skipped.length ? ` — ${skipped[0][1]}` : ""}`);
   }
 
+  async function addSource(path) {
+    const next = await call("source", { path, section });
+    if (!next) return;
+    invalidate();
+    toast(`Playing ${section} from ${next.result}`);
+  }
+
+  async function chooseFolder() {
+    const button = $("pick-folder");
+    button.disabled = true;
+    button.textContent = "Waiting for the chooser…";
+    try {
+      const picked = await api("pick", { kind: "folder", title: `Choose a ${section} folder for bgst` });
+      if (!picked.available) {
+        toast(`No system chooser here (${picked.reason || "no Tk"}) — browse below instead`, true);
+      } else if (picked.paths.length) {
+        await browse(picked.paths[0]);
+        toast("Folder opened — Link all, or Source to play it in place");
+      }
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Choose a folder…";
+    }
+  }
+
   // -- wiring ---------------------------------------------------------
   function showPanel(name) {
+    panel = name;
     document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === `panel-${name}`));
     document.querySelectorAll(".rail-btn").forEach((b) => b.classList.toggle("active", b.dataset.panel === name));
     if (name === "add") browse(browsePath);
+    if (name === "music" || name === "ambient") loadLibrary(name);
+  }
+
+  function setSection(name) {
+    section = name;
+    document.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("active", b.dataset.section === name));
+    if (panel === "add") browse(browsePath);
   }
 
   document.querySelectorAll(".rail-btn").forEach((button) =>
     button.addEventListener("click", () => showPanel(button.dataset.panel)));
   document.querySelectorAll("[data-goto]").forEach((button) =>
     button.addEventListener("click", () => {
-      section = button.dataset.goto === "add" && button.closest("#panel-ambient") ? "ambient" : section;
       if (button.closest("#panel-ambient")) setSection("ambient");
       if (button.closest("#panel-music")) setSection("music");
       showPanel("add");
     }));
-
-  function setSection(name) {
-    section = name;
-    document.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("active", b.dataset.section === name));
-  }
   document.querySelectorAll(".seg-btn").forEach((button) =>
     button.addEventListener("click", () => setSection(button.dataset.section)));
 
   $("transport").addEventListener("click", () => call("toggle", {}));
   $("skip").addEventListener("click", () => call("skip", {}));
+  $("pick-folder").addEventListener("click", chooseFolder);
+  $("path-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = $("path-input").value.trim();
+    if (value) browse(value);
+  });
   $("prune").addEventListener("click", async () => {
     const next = await call("prune", {});
-    if (next) toast(`${next.result.length} broken link(s) removed`);
+    if (next) { invalidate(); toast(`${next.result.length} broken link(s) removed`); }
   });
 
   Object.keys(SLIDERS).forEach((key) => {
@@ -287,13 +404,26 @@
   });
 
   // -- polling --------------------------------------------------------
+  let failures = 0;
   async function poll() {
     try {
       render(await api("state"));
+      failures = 0;
+      $("offline").hidden = true;
     } catch (err) {
       $("now-kind").textContent = "Disconnected";
+      if (!SERVED) {
+        offline();
+      } else if (++failures > 2) {
+        offline(`Cannot reach the bgst server (${err.message}). Is it still running?`);
+      }
     }
   }
-  poll();
-  setInterval(poll, 1000);
+
+  if (!SERVED) {
+    offline();
+  } else {
+    poll();
+    setInterval(poll, 1000);
+  }
 })();

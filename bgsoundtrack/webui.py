@@ -170,6 +170,11 @@ class Handler(BaseHTTPRequestHandler):
             return session.snapshot()
         if route == "browse" and method == "GET":
             return browse((query.get("path") or [None])[0])
+        if route == "library" and method == "GET":
+            section = (query.get("section") or ["music"])[0]
+            if section not in library.SECTIONS:
+                raise ValueError(f"unknown section {section!r}")
+            return session.library(section)
         if method != "POST":
             return None
         body = self._body()
@@ -194,6 +199,27 @@ class Handler(BaseHTTPRequestHandler):
             session.unlink(body["name"], body.get("section", "music"))
         elif route == "prune":
             return {**session.snapshot(), "result": session.prune()}
+        elif route == "source":
+            path = body.get("path")
+            if not path:
+                raise ValueError("source needs a path")
+            section = body.get("section", "music")
+            if body.get("remove"):
+                result = session.remove_source(path, section)
+            else:
+                result = session.add_source(path, section)
+            return {**session.snapshot(), "result": result}
+        elif route == "pick":
+            # Blocks until the person at the machine answers the dialog.
+            picked = session.pick(
+                body.get("kind", "folder"),
+                body.get("title", "Choose a folder for bgst"),
+            )
+            return {
+                "paths": picked.paths,
+                "available": picked.available,
+                "reason": picked.reason,
+            }
         else:
             return None
         return session.snapshot()
