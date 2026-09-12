@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bgsoundtrack"
+version = "0.1.0"
+description = "Play a custom game soundtrack with random silence or ambience between songs"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+classifiers = [
+  "Environment :: Console",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Sound/Audio :: Players",
+]
+
+[project.scripts]
+bgst = "bgsoundtrack.cli:main"
+
+[tool.setuptools]
+packages = ["bgsoundtrack"]
