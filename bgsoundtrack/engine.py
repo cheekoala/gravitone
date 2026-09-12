@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from bgsoundtrack import library, player
+from bgsoundtrack import library, player, playlists
 from bgsoundtrack.config import Config
 
 
@@ -72,9 +72,14 @@ class Engine:
         controls: Controls | None = None,
         sleep=time.sleep,
         monotonic=time.monotonic,
+        store: playlists.Store | None = None,
     ):
         self.config = config
         self.backend = backend
+        # Which playlist is playing, and a version to notice edits by.
+        self.store = store or playlists.Store(
+            playlists=[library.resolve(config, None)]
+        )
         self.rng = rng or random.Random()
         self.controls = controls or Controls()
         self._sleep = sleep
@@ -115,18 +120,32 @@ class Engine:
     # -- the session -----------------------------------------------------
 
     def run(self, on_event=None):
-        """Play until the library is exhausted (or forever, if config.loop)."""
-        emit = on_event or (lambda event: None)
-        music = library.tracks(self.config, "music")
-        ambient = library.tracks(self.config, "ambient")
-        if not music:
-            raise RuntimeError(
-                f"no music in {self.config.music_dir} - add some with 'bgst link <path>'"
-            )
+        """Play until the playlist is exhausted (or forever, if config.loop).
 
+        The track list is rebuilt whenever the playlist changes underneath us -
+        switching playlist, linking, removing a track - so an edit lands on the
+        next track instead of the next full pass.
+        """
+        emit = on_event or (lambda event: None)
+        music: list[Path] = []
+        ambient: list[Path] = []
         queue: list[Path] = []
+        seen_version = None
         started = False
+
         while not self.controls.stopping:
+            if seen_version != self.store.version:
+                playlist = self.store.current()
+                music = library.tracks(self.config, "music", playlist)
+                ambient = library.tracks(self.config, "ambient", playlist)
+                seen_version = self.store.version
+                queue = []
+                if not music:
+                    raise RuntimeError(
+                        f"nothing to play in {playlist.name} - add music with "
+                        f"'bgst link <path>' or 'bgst source add <folder>'"
+                    )
+
             if not queue:
                 if started and not self.config.loop:
                     break

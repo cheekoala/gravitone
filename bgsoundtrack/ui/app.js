@@ -106,6 +106,10 @@
     if (!seen.length) history.append(el("li", "empty", "Nothing yet"));
     seen.forEach((name) => history.append(el("li", null, name)));
 
+    renderPlaylistPicker(next);
+    renderPlaylists(next);
+    renderRemoved(next);
+
     $("music-count").textContent = String(next.counts.music);
     $("ambient-count").textContent = String(next.counts.ambient);
     renderLibrary("music");
@@ -121,6 +125,102 @@
     if (next.error) note += `— ${next.error}`;
     $("backend-note").textContent = note;
     $("pick-folder").hidden = !next.picker;
+  }
+
+  function renderPlaylistPicker(next) {
+    const picker = $("playlist-select");
+    const signature = next.playlists.map((p) => `${p.id}:${p.name}`).join("|");
+    if (picker.dataset.signature !== signature) {
+      picker.replaceChildren();
+      next.playlists.forEach((item) => {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.name;
+        picker.append(option);
+      });
+      picker.dataset.signature = signature;
+    }
+    if (document.activeElement !== picker) picker.value = next.playlist;
+  }
+
+  function renderPlaylists(next) {
+    const list = $("playlists-list");
+    if (list.querySelector("input.rename")) return;   // mid-rename, leave it alone
+    list.replaceChildren();
+    next.playlists.forEach((item) => {
+      const row = el("li", item.active ? "active" : null);
+      const name = el("div", "s-name", item.name);
+      name.title = item.active ? "Playing from this one" : "Switch to this playlist";
+      name.addEventListener("click", () => selectPlaylist(item.id));
+      const meta = el("span", "s-meta",
+        `${item.sources} source${item.sources === 1 ? "" : "s"}` +
+        (item.removed ? `, ${item.removed} removed` : ""));
+
+      const rename = el("button", "s-edit", "✎");
+      rename.title = `Rename ${item.name}`;
+      rename.addEventListener("click", () => startRename(row, name, item));
+      row.append(name, meta, rename);
+
+      if (!item.default) {
+        const remove = el("button", "t-remove", "✕");
+        remove.title = `Delete the playlist ${item.name} (its links stay on disk)`;
+        remove.addEventListener("click", async () => {
+          const done = await call("playlist", { action: "remove", id: item.id });
+          if (done) { invalidate(); toast(`Deleted ${item.name}`); }
+        });
+        row.append(remove);
+      }
+      list.append(row);
+    });
+  }
+
+  function startRename(row, nameNode, item) {
+    const input = el("input", "rename");
+    input.value = item.name;
+    row.replaceChild(input, nameNode);
+    input.focus();
+    input.select();
+    const finish = async (commit) => {
+      const value = input.value.trim();
+      input.replaceWith(nameNode);
+      if (commit && value && value !== item.name) {
+        const done = await call("playlist", { action: "rename", id: item.id, name: value });
+        if (done) toast(`Renamed to ${value}`);
+      }
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") finish(true);
+      if (event.key === "Escape") finish(false);
+    });
+    input.addEventListener("blur", () => finish(true));
+  }
+
+  function renderRemoved(next) {
+    const card = $("removed-card");
+    const list = $("removed-list");
+    card.hidden = !next.removed.length;
+    list.replaceChildren();
+    next.removed.forEach((item) => {
+      const row = el("li");
+      const name = el("div", "s-name", item.name);
+      name.title = item.target;
+      const restore = el("button", "ghost small", "Restore");
+      restore.addEventListener("click", async () => {
+        const done = await call("restore-track", { target: item.target });
+        if (done) { invalidate(); toast(`Restored ${item.name}`); }
+      });
+      row.append(name, restore);
+      list.append(row);
+    });
+  }
+
+  async function selectPlaylist(id) {
+    const done = await call("playlist", { action: "select", id });
+    if (done) {
+      invalidate();
+      const chosen = done.playlists.find((p) => p.id === id);
+      toast(`Playing from ${chosen ? chosen.name : id}`);
+    }
   }
 
   function renderLibrary(name) {
@@ -144,17 +244,16 @@
       body.append(el("div", "t-name", track.name), el("div", "t-target", shortPath(track.target)));
       row.append(body);
       if (track.origin === "source") {
-        // It is not in the library folder, so there is no link to remove;
-        // the source folder itself is dropped from Config.
         const tag = el("span", "tag source", "source");
         tag.title = `From the source folder ${track.source}`;
         row.append(tag);
-      } else {
-        const remove = el("button", "t-remove", "✕");
-        remove.title = `Unlink ${track.name}`;
-        remove.addEventListener("click", () => unlink(track.name, name));
-        row.append(remove);
       }
+      const remove = el("button", "t-remove", "✕");
+      remove.title = track.origin === "source"
+        ? `Remove from this playlist (the file stays where it is)`
+        : `Unlink ${track.name} from this playlist`;
+      remove.addEventListener("click", () => removeTrack(track.name, name));
+      row.append(remove);
       list.append(row);
     });
     broken.forEach((brokenName) => {
@@ -228,9 +327,13 @@
     if (panel === "music" || panel === "ambient") loadLibrary(panel);
   }
 
-  async function unlink(name, sectionName) {
-    const done = await call("unlink", { name, section: sectionName });
-    if (done) { invalidate(); toast(`Unlinked ${name}`); }
+  async function removeTrack(name, sectionName) {
+    const done = await call("remove-track", { name, section: sectionName });
+    if (!done) return;
+    invalidate();
+    toast(done.result.how === "unlinked"
+      ? `Unlinked ${name}`
+      : `${name} removed from this playlist — restore it in Config`);
   }
 
   // -- add panel ------------------------------------------------------
@@ -340,6 +443,15 @@
     }
   }
 
+  async function createPlaylist(name, source) {
+    const done = await call("playlist", { action: "new", name, source });
+    if (!done) return null;
+    if (source) await call("playlist", { action: "select", id: done.result });
+    invalidate();
+    toast(source ? `Playing from ${name}` : `Created ${name}`);
+    return done.result;
+  }
+
   // -- wiring ---------------------------------------------------------
   function showPanel(name) {
     panel = name;
@@ -373,6 +485,29 @@
     event.preventDefault();
     const value = $("path-input").value.trim();
     if (value) browse(value);
+  });
+  $("playlist-select").addEventListener("change", (event) => selectPlaylist(event.target.value));
+  $("new-playlist-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const value = $("new-playlist-name").value.trim();
+    if (!value) return;
+    if (await createPlaylist(value, null)) $("new-playlist-name").value = "";
+  });
+  $("new-from-folder").addEventListener("click", () => {
+    const form = $("folder-playlist-form");
+    form.hidden = !form.hidden;
+    if (!form.hidden) {
+      const parts = (browsePath || "").split(/[\\/]/).filter(Boolean);
+      $("folder-playlist-name").value = parts[parts.length - 1] || "New playlist";
+      $("folder-playlist-name").focus();
+      $("folder-playlist-name").select();
+    }
+  });
+  $("folder-playlist-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const value = $("folder-playlist-name").value.trim();
+    if (!value || !browsePath) return;
+    if (await createPlaylist(value, browsePath)) $("folder-playlist-form").hidden = true;
   });
   $("prune").addEventListener("click", async () => {
     const next = await call("prune", {});

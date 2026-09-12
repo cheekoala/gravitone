@@ -177,7 +177,7 @@ def test_stop_ends_the_session(config, fake_player):
 def test_empty_music_library_is_an_error(tmp_path):
     cfg = Config(root=str(tmp_path / "empty"))
     library.init(cfg)
-    with pytest.raises(RuntimeError, match="no music"):
+    with pytest.raises(RuntimeError, match="nothing to play"):
         make_engine(cfg).run()
 
 

@@ -7,6 +7,9 @@ Point it at music you already have, and it plays a shuffled soundtrack behind
 whatever game you're in — with a random gap after each song that is either
 silence or a bed of ambience (wind, rain, tavern noise, crickets).
 
+- **Playlists.** Two folders you switch between — one per game, per mood, per
+  session. Each keeps its own links, its own source folders, and remembers
+  which tracks you took out of it. Switching lands on the next track.
 - **Two ways in, mixed freely.** *Link* a file and a symlink lands in your
   `custom soundtrack` folder, pointing at where it already lives — a 40 GB
   collection costs a few KB of directory entries. Or set a whole folder as a
@@ -72,10 +75,10 @@ Or from the terminal:
 
 ```sh
 bgst init                                    # create the custom soundtrack folder
-bgst source add ~/Music/Soundtracks          # play a whole folder in place
-bgst source add --ambient ~/Sounds/weather
-bgst link ~/Music/Nier ~/Music/Outer\ Wilds  # or link track by track
-bgst link --ambient ~/Sounds/rain.ogg
+bgst playlist new "Hollow Kingdom" --source ~/Music/Nier --use
+bgst playlist new "Field Work" --source ~/Sounds/recordings
+bgst source add --ambient ~/Sounds/weather   # into the selected playlist
+bgst link ~/Music/Outer\ Wilds               # or link track by track
 bgst play
 ```
 
@@ -99,6 +102,7 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 | ![The music library, mixing linked tracks with one from a source folder](docs/ui-library.png) | ![Settings, including source folders](docs/ui-settings.png) |
 | ![Adding files: link them, or play a folder in place](docs/ui-add.png) | |
 
+- **Top bar** — the playlist selector; switching it switches what plays.
 - **Now** — what is playing or how long the current gap runs, with history.
 - **Music / Ambient** — the two libraries; `✕` removes a link, never a file.
 - **Add** — *Choose a folder…* opens your desktop's own folder dialog (needs
@@ -107,9 +111,9 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
   *contents*, never paths, and paths are what linking needs. Every folder row
   offers both **Link all** (symlinks each file) and **Source** (play the
   folder in place).
-- **Config** — gaps, levels, shuffle, loop, and your source folders (with
-  their track counts). Changes save immediately and take effect from the next
-  gap; no need to restart playback.
+- **Config** — gaps, levels, shuffle, loop, your playlists (rename, delete,
+  create) and this playlist's source folders and removed tracks. Changes save
+  immediately and take effect from the next gap; no need to restart playback.
 
 Keys: `space` play/stop, `n` next. Every API call needs the token in the URL,
 so another page in your browser cannot drive your player or read your disk.
@@ -122,6 +126,40 @@ bgst ui --host 0.0.0.0        # prints a LAN URL with the token
 
 Anyone who has that link can control playback, so use it on networks you
 trust.
+
+## Playlists
+
+Already have two folders you think of as two playlists? Make them two:
+
+```sh
+bgst playlist new "Hollow Kingdom" --source ~/Music/hollow-kingdom --use
+bgst playlist new "Night Drive"    --source ~/Music/night-drive
+bgst playlist list
+bgst playlist use "Night Drive"
+```
+
+Or pick them from the selector in the top bar of the UI. A playlist owns:
+
+- its **source folders**, played in place;
+- its own **links**, in `custom soundtrack/playlists/<id>/`;
+- its **removals** — take a track out with `✕` (or `bgst unlink NAME`) and it
+  stays out of *this* playlist, remembered across restarts. The same file
+  keeps playing in any other playlist that points at it, and the file itself
+  is never touched. Put it back from Config → *Removed from this playlist*,
+  or `bgst playlist restore --all`.
+
+Removing a **linked** track deletes that playlist's link instead — there is
+nothing to remember, and the other playlists keep theirs.
+
+Switching playlist while music is playing takes effect at the next track, not
+the next full pass — as does linking, removing, or adding a source.
+
+The playlist called **Library** is the plain `custom soundtrack/music` and
+`/ambient` folders, so an install from before playlists keeps working exactly
+as it did, source folders and all.
+
+Playlists live in `~/.config/bgsoundtrack/playlists.json` — plain JSON, easy
+to read, back up, or edit by hand.
 
 ## The library
 
@@ -156,10 +194,14 @@ one to drop a track. The player ignores non-audio files and dangling links.
 | `bgst play` | play in the terminal (`n` next, `q` quit) |
 | `bgst link PATH...` | symlink files/folders in (`--ambient`, `--no-recursive`, `--relative`) |
 | `bgst source add\|remove\|list` | play whole folders in place (`--ambient`) |
+| `bgst playlist list\|new\|use\|rename\|remove` | switch between sets of music |
+| `bgst playlist removed\|restore` | see and undo removals in this playlist |
 | `bgst unlink NAME...` | remove entries (only ever deletes symlinks, never real files) |
 | `bgst list --targets` | show the library and what each link points at |
 | `bgst prune` | drop links whose target moved or was deleted |
 | `bgst doctor` | check folders, tracks and available players |
+
+Any command takes `--playlist NAME` to act on a playlist without selecting it.
 
 `--relative` writes relative symlinks, which keep working if the library and
 your music move together (e.g. both on one external drive).

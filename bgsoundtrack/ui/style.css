@@ -52,6 +52,27 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   background: linear-gradient(145deg, var(--accent), var(--select));
 }
 .brand-name { font-weight: 650; letter-spacing: -0.01em; }
+.playlist-pick { position: relative; display: inline-flex; align-items: center; flex: none; }
+.playlist-pick select {
+  appearance: none; -webkit-appearance: none;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px 26px 5px 10px; font: inherit; font-size: 13px; cursor: pointer;
+  max-width: 190px; text-overflow: ellipsis;
+}
+.playlist-pick select:hover { border-color: #33333a; }
+.playlist-pick select:focus-visible { outline: 2px solid var(--select); outline-offset: 1px; }
+.playlist-pick .chev { position: absolute; right: 7px; width: 13px; height: 13px; color: var(--muted); pointer-events: none; }
+
+.sources li.active { border-color: rgba(124,58,237,.5); background: rgba(124,58,237,.1); }
+.sources .s-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sources .s-edit { background: none; border: none; color: var(--faint); padding: 4px 6px; border-radius: 6px; flex: none; }
+.sources .s-edit:hover { color: var(--text); background: #1e1e23; }
+.sources input.rename {
+  flex: 1; min-width: 0; background: var(--panel); color: var(--text);
+  border: 1px solid var(--select); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 13px;
+}
+
 .brand-sub {
   font: 11px/1 var(--mono); color: var(--faint);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

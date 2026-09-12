@@ -15,6 +15,10 @@
     <div class="brand">
       <span class="brand-dot"></span>
       <span class="brand-name">bgst</span>
+      <label class="playlist-pick">
+        <select id="playlist-select" title="Playlist"></select>
+        <svg viewBox="0 0 24 24" class="icon chev"><path d="M6 9l6 6 6-6"/></svg>
+      </label>
       <span class="brand-sub" id="root-path"></span>
     </div>
     <div class="topbar-actions">
@@ -129,7 +133,12 @@
             <input type="text" id="path-input" placeholder="…or paste a path" spellcheck="false" autocomplete="off">
             <button class="ghost small" type="submit">Go</button>
           </form>
+          <button class="ghost small" id="new-from-folder">New playlist from this folder</button>
         </div>
+        <form class="path-form" id="folder-playlist-form" hidden>
+          <input type="text" id="folder-playlist-name" placeholder="Playlist name" autocomplete="off">
+          <button class="ghost small" type="submit">Create &amp; select</button>
+        </form>
         <div class="shortcuts" id="shortcuts"></div>
         <div class="crumb" id="crumb"></div>
         <ul class="browser" id="browser"></ul>
@@ -153,6 +162,20 @@
             <input type="range" id="volume" min="0" max="100" step="1"><output id="volume-out"></output></label>
           <label class="field"><span>Ambience volume</span>
             <input type="range" id="ambient_volume" min="0" max="100" step="1"><output id="ambient_volume-out"></output></label>
+        </div>
+        <div class="card">
+          <div class="kicker">Playlists</div>
+          <p class="hint">Each playlist has its own links, source folders and removals. Switching one in changes what plays from the next track.</p>
+          <ul class="sources" id="playlists-list"></ul>
+          <form class="path-form" id="new-playlist-form">
+            <input type="text" id="new-playlist-name" placeholder="New playlist name" autocomplete="off">
+            <button class="ghost small" type="submit">Create</button>
+          </form>
+        </div>
+        <div class="card" id="removed-card" hidden>
+          <div class="kicker">Removed from this playlist</div>
+          <p class="hint">Files in a source folder are never deleted — they are just kept out of this playlist.</p>
+          <ul class="sources" id="removed-list"></ul>
         </div>
         <div class="card">
           <div class="kicker">Source folders</div>

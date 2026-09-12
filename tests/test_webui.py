@@ -175,3 +175,79 @@ def test_pick_reports_when_no_chooser_is_available(server, monkeypatch):
     )
     result = request(httpd, "/api/pick", {"kind": "folder"})
     assert result == {"paths": [], "available": False, "reason": "no Tk here"}
+
+
+# -- playlists through the API -----------------------------------------
+
+
+def test_playlist_create_select_and_remove(server, tmp_path):
+    httpd, session, config, _ = server
+    album = tmp_path / "night"
+    make_audio(album, "drive.mp3")
+
+    state = request(httpd, "/api/playlist", {"action": "new", "name": "Night Drive",
+                                             "source": str(album)})
+    assert [p["name"] for p in state["playlists"]] == ["Library", "Night Drive"]
+    assert state["playlist"] == "default"          # created, not selected
+
+    state = request(httpd, "/api/playlist", {"action": "select", "id": "night-drive"})
+    assert state["playlist"] == "night-drive"
+    assert state["counts"]["music"] == 1
+    assert [p["active"] for p in state["playlists"]] == [False, True]
+
+    state = request(httpd, "/api/playlist", {"action": "rename", "id": "night-drive",
+                                             "name": "Night"})
+    assert state["playlists"][1]["name"] == "Night"
+
+    state = request(httpd, "/api/playlist", {"action": "remove", "id": "night-drive"})
+    assert [p["name"] for p in state["playlists"]] == ["Library"]
+    assert state["playlist"] == "default"
+    assert (album / "drive.mp3").exists()
+
+
+def test_the_library_playlist_cannot_be_removed(server):
+    httpd, *_ = server
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        request(httpd, "/api/playlist", {"action": "remove", "id": "default"})
+    assert caught.value.code == 400
+
+
+def test_remove_track_is_remembered_and_restorable(server, tmp_path):
+    httpd, session, config, _ = server
+    album = tmp_path / "album"
+    make_audio(album, "a.mp3")
+    make_audio(album, "b.mp3")
+    request(httpd, "/api/source", {"path": str(album)})
+
+    state = request(httpd, "/api/remove-track", {"name": "b.mp3"})
+    assert state["result"]["how"] == "removed"
+    assert state["counts"]["music"] == 1
+    assert [item["name"] for item in state["removed"]] == ["b.mp3"]
+    assert (album / "b.mp3").exists()
+
+    # and it stays removed across a restart of the session
+    reborn = Session(config, session.config_path)
+    assert [t["name"] for t in reborn.library("music")["tracks"]] == ["a.mp3"]
+
+    state = request(httpd, "/api/restore-track", {"target": str(album / "b.mp3")})
+    assert state["counts"]["music"] == 2
+    assert state["removed"] == []
+
+
+def test_remove_track_unlinks_a_linked_track(server, tmp_path):
+    httpd, _, config, _ = server
+    source = make_audio(tmp_path / "src", "song.mp3")
+    request(httpd, "/api/link", {"path": str(source.parent)})
+
+    state = request(httpd, "/api/remove-track", {"name": "song.mp3"})
+    assert state["result"]["how"] == "unlinked"
+    assert state["counts"]["music"] == 0
+    assert state["removed"] == []      # nothing to remember - the link is gone
+    assert source.exists()
+
+
+def test_unknown_playlist_action_is_rejected(server):
+    httpd, *_ = server
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        request(httpd, "/api/playlist", {"action": "explode"})
+    assert caught.value.code == 400

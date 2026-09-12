@@ -10,7 +10,14 @@ import sys
 import threading
 from pathlib import Path
 
-from bgsoundtrack import __version__, config as config_module, engine, library, player
+from bgsoundtrack import (
+    __version__,
+    config as config_module,
+    engine,
+    library,
+    player,
+    playlists,
+)
 from bgsoundtrack.config import Config
 
 
@@ -19,20 +26,34 @@ def _fmt(seconds: float) -> str:
     return f"{minutes}:{secs:02d}" if minutes else f"{secs}s"
 
 
+def _config_path(args) -> Path | None:
+    return Path(args.config).expanduser() if args.config else None
+
+
 def _load_config(args) -> Config:
-    config = config_module.load(Path(args.config).expanduser() if args.config else None)
+    config = config_module.load(_config_path(args))
     if args.root:
         config.root = str(Path(args.root).expanduser())
     config.validate()
     return config
 
 
+def _load(args):
+    """Config plus the playlist store, and whichever playlist is selected."""
+    config = _load_config(args)
+    store = playlists.load(config, _config_path(args))
+    wanted = getattr(args, "playlist", None)
+    # --playlist is a one-off override; it must not change what is selected.
+    playlist = store.get(wanted) if wanted else store.current()
+    return config, store, playlist
+
+
 # -- commands ------------------------------------------------------------
 
 
 def cmd_init(args) -> int:
-    config = _load_config(args)
-    created = library.init(config)
+    config, store, playlist = _load(args)
+    created = library.init(config, playlist)
     print(f"custom soundtrack folder: {config.root_path}")
     for path in created:
         print(f"  created {path}")
@@ -44,8 +65,8 @@ def cmd_init(args) -> int:
 
 
 def cmd_link(args) -> int:
-    config = _load_config(args)
-    library.init(config)
+    config, store, playlist = _load(args)
+    library.init(config, playlist)
     section = "ambient" if args.ambient else "music"
     result = library.link(
         config,
@@ -53,32 +74,113 @@ def cmd_link(args) -> int:
         section=section,
         recursive=not args.no_recursive,
         relative=args.relative,
+        playlist=playlist,
     )
     for path in result.linked:
         print(f"linked {path.name}")
     for path, reason in result.skipped:
         print(f"skipped {path.name}: {reason}", file=sys.stderr)
-    print(f"\n{len(result.linked)} linked into {section}, {len(result.skipped)} skipped")
+    print(
+        f"\n{len(result.linked)} linked into {playlist.name}/{section}, "
+        f"{len(result.skipped)} skipped"
+    )
     return 0
 
 
 def cmd_unlink(args) -> int:
-    config = _load_config(args)
+    config, store, playlist = _load(args)
     section = "ambient" if args.ambient else "music"
-    for path in library.unlink(config, args.names, section=section):
-        print(f"removed {path.name}")
+    for name in args.names:
+        how, target = library.remove_track(config, name, section=section, playlist=playlist)
+        store.save()
+        print(f"{how} {name}" + ("" if how == "unlinked" else f" (remembered for {playlist.name})"))
+    return 0
+
+
+def cmd_playlist(args) -> int:
+    """Switch between sets of music, each with its own links and removals."""
+    config, store, playlist = _load(args)
+
+    if args.action == "list":
+        for item in store.playlists:
+            mark = "*" if item.id == store.active else " "
+            counts = library.entries(config, "music", item)
+            print(
+                f" {mark} {item.name}  [{item.id}]  {len(counts)} music, "
+                f"{len(item.music_sources) + len(item.ambient_sources)} source(s), "
+                f"{len(item.excluded)} removed"
+            )
+        return 0
+
+    if args.action == "use":
+        chosen = store.select(args.name)
+        library.init(config, chosen)
+        store.save()
+        print(f"now playing from {chosen.name}")
+        return 0
+
+    if args.action == "new":
+        created = store.add(args.name)
+        library.init(config, created)
+        if args.source:
+            library.add_source(config, Path(args.source), playlist=created)
+        if args.use:
+            store.select(created.id)
+        store.save()
+        print(f"created playlist {created.name} [{created.id}]")
+        if args.source:
+            print(f"  source {Path(args.source).expanduser().resolve()}")
+        if args.use:
+            print("  selected")
+        return 0
+
+    if args.action == "rename":
+        renamed = store.rename(args.name, args.new_name)
+        store.save()
+        print(f"renamed to {renamed.name}")
+        return 0
+
+    if args.action == "remove":
+        gone = store.remove(args.name)
+        store.save()
+        print(f"removed playlist {gone.name} (its links are still in {config.root_path})")
+        return 0
+
+    if args.action == "removed":
+        if not playlist.excluded:
+            print(f"nothing removed from {playlist.name}")
+            return 0
+        print(f"removed from {playlist.name}:")
+        for target in playlist.excluded:
+            print(f"  {target}")
+        return 0
+
+    if args.action == "restore":
+        if args.all:
+            count = len(playlist.excluded)
+            playlist.excluded = []
+            library.invalidate_cache()
+            store.save()
+            print(f"restored {count} track(s) to {playlist.name}")
+            return 0
+        for target in args.paths:
+            restored = library.restore_track(config, target, playlist=playlist)
+            print(f"restored {restored.name}")
+        store.save()
+        return 0
+
     return 0
 
 
 def cmd_source(args) -> int:
     """Play a folder in place, instead of linking its files one by one."""
-    config = _load_config(args)
-    path = Path(args.config).expanduser() if args.config else None
+    config, store, playlist = _load(args)
     section = "ambient" if getattr(args, "ambient", False) else "music"
 
     if args.action == "list":
+        print(f"playlist: {playlist.name}\n")
         for name in ("music", "ambient"):
-            folders = config.sources(name)
+            folders = playlist.sources(name)
             print(f"{name} sources ({len(folders)}):")
             for folder in folders:
                 mark = "" if folder.is_dir() else "  MISSING"
@@ -88,21 +190,26 @@ def cmd_source(args) -> int:
 
     for target in args.paths:
         if args.action == "add":
-            added = library.add_source(config, Path(target), section=section)
-            print(f"added {section} source {added} "
-                  f"({len(library.scan(added))} audio files)")
+            added = library.add_source(config, Path(target), section=section, playlist=playlist)
+            print(
+                f"added {section} source {added} to {playlist.name} "
+                f"({len(library.scan(added))} audio files)"
+            )
         else:
-            removed = library.remove_source(config, Path(target), section=section)
-            print(f"removed {section} source {removed}")
-    config_module.save(config, path)
+            removed = library.remove_source(
+                config, Path(target), section=section, playlist=playlist
+            )
+            print(f"removed {section} source {removed} from {playlist.name}")
+    store.save()
     return 0
 
 
 def cmd_list(args) -> int:
-    config = _load_config(args)
+    config, store, playlist = _load(args)
     sections = ("ambient",) if args.ambient else ("music",) if args.music else library.SECTIONS
+    print(f"playlist: {playlist.name}\n")
     for section in sections:
-        entries = library.entries(config, section)
+        entries = library.entries(config, section, playlist)
         print(f"{section} ({len(entries)}):")
         for entry in entries:
             tag = "" if entry.origin == "link" else "  (source)"
@@ -110,15 +217,20 @@ def cmd_list(args) -> int:
                 print(f"  {entry.name} -> {entry.target}{tag}")
             else:
                 print(f"  {entry.name}{tag}")
-        for entry in library.broken(config, section):
+        for entry in library.broken(config, section, playlist):
             print(f"  {entry.name} -> BROKEN", file=sys.stderr)
+        print()
+    if playlist.excluded:
+        print(f"removed from {playlist.name} ({len(playlist.excluded)}):")
+        for target in playlist.excluded:
+            print(f"  {Path(target).name}")
         print()
     return 0
 
 
 def cmd_prune(args) -> int:
-    config = _load_config(args)
-    removed = library.prune(config)
+    config, store, playlist = _load(args)
+    removed = library.prune(config, playlist=playlist)
     for path in removed:
         print(f"removed broken link {path.name}")
     print(f"{len(removed)} broken link(s) removed")
@@ -154,21 +266,22 @@ def cmd_config(args) -> int:
 
 
 def cmd_doctor(args) -> int:
-    config = _load_config(args)
+    config, store, playlist = _load(args)
     print(f"version         {__version__}")
     print(f"root            {config.root_path}")
     print(f"root exists     {config.root_path.is_dir()}")
+    print(f"playlist        {playlist.name} ({len(store.playlists)} in total)")
     for section in library.SECTIONS:
-        entries = library.entries(config, section)
+        entries = library.entries(config, section, playlist)
         linked = sum(1 for entry in entries if entry.origin == "link")
-        bad = library.broken(config, section)
+        bad = library.broken(config, section, playlist)
         print(
             f"{section:15} {len(entries)} playable "
             f"({linked} linked, {len(entries) - linked} from sources), "
             f"{len(bad)} broken link(s)"
         )
     for section in library.SECTIONS:
-        for folder in config.sources(section):
+        for folder in playlist.sources(section):
             state = "ok" if folder.is_dir() else "MISSING"
             print(f"{section[:7]} source  {folder} [{state}]")
     from bgsoundtrack import picker
@@ -271,7 +384,7 @@ def _pick_source(args) -> int:
 
 
 def cmd_play(args) -> int:
-    config = _load_config(args)
+    config, store, playlist = _load(args)
     _apply_play_overrides(config, args)
     try:
         backend = player.detect(args.player)
@@ -284,7 +397,7 @@ def cmd_play(args) -> int:
     signal.signal(signal.SIGTERM, lambda *_: controls.stop())
 
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
-    runner = engine.Engine(config, backend, rng=rng, controls=controls)
+    runner = engine.Engine(config, backend, rng=rng, controls=controls, store=store)
 
     def on_event(event: engine.Event) -> None:
         if event.kind == "track":
@@ -298,7 +411,7 @@ def cmd_play(args) -> int:
 
     interactive = sys.stdin.isatty() and not args.no_keys
     if interactive:
-        print(f"playing with {backend.name} - n: next, q: quit")
+        print(f"playing {playlist.name} with {backend.name} - n: next, q: quit")
         threading.Thread(target=_key_listener, args=(controls,), daemon=True).start()
 
     try:
@@ -323,6 +436,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"bgst {__version__}")
     parser.add_argument("--root", help="custom soundtrack folder (overrides config)")
     parser.add_argument("--config", help="path to the config file")
+    parser.add_argument(
+        "--playlist", help="act on this playlist instead of the selected one"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("init", help="create the custom soundtrack folder")
@@ -339,6 +455,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("names", nargs="+")
     p.add_argument("--ambient", action="store_true")
     p.set_defaults(func=cmd_unlink)
+
+    p = sub.add_parser(
+        "playlist", help="switch between sets of music, each with its own removals"
+    )
+    playlist_actions = p.add_subparsers(dest="action", required=True)
+    sp = playlist_actions.add_parser("list", help="show every playlist")
+    sp.set_defaults(func=cmd_playlist)
+    sp = playlist_actions.add_parser("use", help="select a playlist")
+    sp.add_argument("name")
+    sp.set_defaults(func=cmd_playlist)
+    sp = playlist_actions.add_parser("new", help="create a playlist")
+    sp.add_argument("name")
+    sp.add_argument("--source", help="a folder to play in place straight away")
+    sp.add_argument("--use", action="store_true", help="select it as well")
+    sp.set_defaults(func=cmd_playlist)
+    sp = playlist_actions.add_parser("rename", help="rename a playlist")
+    sp.add_argument("name")
+    sp.add_argument("new_name", metavar="NEW_NAME")
+    sp.set_defaults(func=cmd_playlist)
+    sp = playlist_actions.add_parser("remove", help="delete a playlist")
+    sp.add_argument("name")
+    sp.set_defaults(func=cmd_playlist)
+    sp = playlist_actions.add_parser("removed", help="tracks taken out of this playlist")
+    sp.set_defaults(func=cmd_playlist)
+    sp = playlist_actions.add_parser("restore", help="put removed tracks back")
+    sp.add_argument("paths", nargs="*", metavar="PATH")
+    sp.add_argument("--all", action="store_true")
+    sp.set_defaults(func=cmd_playlist)
 
     p = sub.add_parser(
         "source",
@@ -411,7 +555,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (library.LibraryError, ValueError) as exc:
+    except (library.LibraryError, playlists.PlaylistError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:

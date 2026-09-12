@@ -18,7 +18,9 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from bgsoundtrack.config import AUDIO_EXTENSIONS, Config
+from bgsoundtrack import playlists
+from bgsoundtrack.config import AUDIO_EXTENSIONS, MUSIC_DIRNAME, AMBIENT_DIRNAME, Config
+from bgsoundtrack.playlists import Playlist
 
 SECTIONS = ("music", "ambient")
 
@@ -47,17 +49,38 @@ class Entry:
         return self.path.name
 
 
-def section_dir(config: Config, section: str) -> Path:
+def resolve(config: Config, playlist: Playlist | None) -> Playlist:
+    """`None` means the Library playlist, seeded from the pre-playlist config."""
+    if playlist is not None:
+        return playlist
+    return Playlist(
+        id=playlists.DEFAULT_ID,
+        name=playlists.DEFAULT_NAME,
+        music_sources=list(config.music_sources),
+        ambient_sources=list(config.ambient_sources),
+    )
+
+
+def section_dir(config: Config, section: str, playlist: Playlist | None = None) -> Path:
+    """Where a playlist keeps its symlinks.
+
+    The Library playlist uses the original `custom soundtrack/music` and
+    `/ambient`; every other playlist gets its own pair under `playlists/`.
+    """
     if section not in SECTIONS:
         raise LibraryError(f"unknown section {section!r} (expected one of {', '.join(SECTIONS)})")
-    return config.music_dir if section == "music" else config.ambient_dir
+    playlist = resolve(config, playlist)
+    if playlist.is_default:
+        return config.music_dir if section == "music" else config.ambient_dir
+    name = MUSIC_DIRNAME if section == "music" else AMBIENT_DIRNAME
+    return config.root_path / "playlists" / playlist.id / name
 
 
-def init(config: Config) -> list[Path]:
-    """Create the library folders. Safe to run repeatedly."""
+def init(config: Config, playlist: Playlist | None = None) -> list[Path]:
+    """Create a playlist's folders. Safe to run repeatedly."""
     created = []
     for section in SECTIONS:
-        path = section_dir(config, section)
+        path = section_dir(config, section, playlist)
         if not path.exists():
             path.mkdir(parents=True, exist_ok=True)
             created.append(path)
@@ -123,9 +146,10 @@ def link(
     section: str = "music",
     recursive: bool = True,
     relative: bool = False,
+    playlist: Playlist | None = None,
 ) -> LinkResult:
-    """Symlink `paths` into the library. Directories are scanned for audio."""
-    directory = section_dir(config, section)
+    """Symlink `paths` into a playlist. Directories are scanned for audio."""
+    directory = section_dir(config, section, playlist)
     directory.mkdir(parents=True, exist_ok=True)
 
     already = existing_targets(directory)
@@ -184,9 +208,14 @@ def _make_link(destination: Path, link_to: Path, target: Path) -> None:
             raise exc
 
 
-def unlink(config: Config, names: list[str], section: str = "music") -> list[Path]:
-    """Remove entries from the library. Only symlinks are ever removed."""
-    directory = section_dir(config, section)
+def unlink(
+    config: Config,
+    names: list[str],
+    section: str = "music",
+    playlist: Playlist | None = None,
+) -> list[Path]:
+    """Remove entries from a playlist. Only links are ever removed."""
+    directory = section_dir(config, section, playlist)
     removed = []
     for name in names:
         entry = directory / Path(name).name
@@ -239,9 +268,11 @@ def scan(directory: Path, ttl: float = _SCAN_TTL) -> list[Path]:
     return found
 
 
-def linked_entries(config: Config, section: str = "music") -> list[Entry]:
-    """Symlinks (and hard links) sitting in the library folder."""
-    directory = section_dir(config, section)
+def linked_entries(
+    config: Config, section: str = "music", playlist: Playlist | None = None
+) -> list[Entry]:
+    """Symlinks (and hard links) sitting in the playlist's own folder."""
+    directory = section_dir(config, section, playlist)
     if not directory.is_dir():
         return []
     found = []
@@ -257,13 +288,21 @@ def linked_entries(config: Config, section: str = "music") -> list[Entry]:
     return found
 
 
-def entries(config: Config, section: str = "music") -> list[Entry]:
+def entries(
+    config: Config, section: str = "music", playlist: Playlist | None = None
+) -> list[Entry]:
     """Everything playable in a section: links first, then source folders.
 
     A file reachable both ways is listed once, as the link - so pointing a
     source folder at something you already linked does not double it up.
+    Tracks removed from this playlist are left out.
     """
-    found = linked_entries(config, section)
+    playlist = resolve(config, playlist)
+    found = [
+        entry
+        for entry in linked_entries(config, section, playlist)
+        if not playlist.is_excluded(entry.target)
+    ]
     seen = set()
     for entry in found:
         try:
@@ -271,7 +310,7 @@ def entries(config: Config, section: str = "music") -> list[Entry]:
         except OSError:
             continue
 
-    for source in config.sources(section):
+    for source in playlist.sources(section):
         for path in scan(source):
             try:
                 key = _file_key(path)
@@ -280,47 +319,94 @@ def entries(config: Config, section: str = "music") -> list[Entry]:
             if key in seen:
                 continue
             seen.add(key)
+            if playlist.is_excluded(path):
+                continue
             found.append(Entry(path=path, target=path, origin="source", source=source))
     return found
 
 
-def tracks(config: Config, section: str = "music") -> list[Path]:
+def tracks(
+    config: Config, section: str = "music", playlist: Playlist | None = None
+) -> list[Path]:
     """Playable files of a section, links and source folders together."""
-    return [entry.path for entry in entries(config, section)]
+    return [entry.path for entry in entries(config, section, playlist)]
 
 
-def add_source(config: Config, path: Path, section: str = "music") -> Path:
+def remove_track(
+    config: Config,
+    name: str,
+    section: str = "music",
+    playlist: Playlist | None = None,
+) -> tuple[str, Path]:
+    """Take one track out of this playlist, whichever way it got in.
+
+    A linked track loses its link; a track from a source folder is remembered
+    as removed, since the file itself is none of our business. Either way the
+    other playlists keep theirs.
+    """
+    playlist = resolve(config, playlist)
+    for entry in entries(config, section, playlist):
+        if entry.name != name:
+            continue
+        if entry.origin == "link":
+            unlink(config, [entry.path.name], section=section, playlist=playlist)
+            return ("unlinked", entry.target)
+        playlist.exclude(entry.target)
+        invalidate_cache()
+        return ("removed", entry.target)
+    raise LibraryError(f"not in this playlist: {name}")
+
+
+def restore_track(config: Config, target: str, playlist: Playlist | None = None) -> Path:
+    """Undo a removal, putting a source track back in the rotation."""
+    playlist = resolve(config, playlist)
+    path = Path(target).expanduser()
+    if not playlist.include(path):
+        raise LibraryError(f"was not removed from this playlist: {path}")
+    invalidate_cache()
+    return path
+
+
+def add_source(
+    config: Config, path: Path, section: str = "music", playlist: Playlist | None = None
+) -> Path:
     """Play a folder in place, without linking anything out of it."""
-    section_dir(config, section)  # validates the section name
+    playlist = resolve(config, playlist)
+    section_dir(config, section, playlist)  # validates the section name
     directory = Path(path).expanduser()
     if not directory.is_dir():
         raise LibraryError(f"not a folder: {directory}")
     directory = directory.resolve()
-    current = config.sources(section)
+    current = playlist.sources(section)
     if directory in current:
-        raise LibraryError(f"already a {section} source: {directory}")
-    config.set_sources(section, current + [directory])
+        raise LibraryError(f"already a {section} source of {playlist.name}: {directory}")
+    playlist.set_sources(section, current + [directory])
     invalidate_cache()
     return directory
 
 
-def remove_source(config: Config, path: Path, section: str = "music") -> Path:
-    section_dir(config, section)
+def remove_source(
+    config: Config, path: Path, section: str = "music", playlist: Playlist | None = None
+) -> Path:
+    playlist = resolve(config, playlist)
+    section_dir(config, section, playlist)
     directory = Path(path).expanduser()
-    current = config.sources(section)
+    current = playlist.sources(section)
     matches = [p for p in current if p == directory or str(p) == str(directory)]
     if not matches:
         resolved = directory.resolve() if directory.exists() else directory
         matches = [p for p in current if p == resolved]
         if not matches:
             raise LibraryError(f"not a {section} source: {directory}")
-    config.set_sources(section, [p for p in current if p not in matches])
+    playlist.set_sources(section, [p for p in current if p not in matches])
     invalidate_cache()
     return matches[0]
 
 
-def broken(config: Config, section: str = "music") -> list[Path]:
-    directory = section_dir(config, section)
+def broken(
+    config: Config, section: str = "music", playlist: Playlist | None = None
+) -> list[Path]:
+    directory = section_dir(config, section, playlist)
     if not directory.is_dir():
         return []
     return sorted(
@@ -330,11 +416,15 @@ def broken(config: Config, section: str = "music") -> list[Path]:
     )
 
 
-def prune(config: Config, sections: tuple[str, ...] = SECTIONS) -> list[Path]:
+def prune(
+    config: Config,
+    sections: tuple[str, ...] = SECTIONS,
+    playlist: Playlist | None = None,
+) -> list[Path]:
     """Delete symlinks whose target has gone away."""
     removed = []
     for section in sections:
-        for entry in broken(config, section):
+        for entry in broken(config, section, playlist):
             entry.unlink()
             removed.append(entry)
     return removed

@@ -92,7 +92,7 @@ def test_cli_play_without_music_fails_cleanly(env, capsys, monkeypatch):
     )
     main(["init"])
     assert main(["play", "--no-keys"]) == 1
-    assert "no music" in capsys.readouterr().err
+    assert "nothing to play" in capsys.readouterr().err
 
 
 def test_cli_prune_removes_broken_links(env, tmp_path, capsys):
@@ -109,13 +109,16 @@ def test_cli_prune_removes_broken_links(env, tmp_path, capsys):
 # -- source folders ----------------------------------------------------
 
 
-def test_sources_round_trip_through_the_config_file(env, tmp_path):
+def test_legacy_config_sources_become_the_library_playlist(env, tmp_path):
+    """Upgrading from a version without playlists must not lose the folders."""
     cfg = Config()
     config_module.set_value(cfg, "music_sources", f"{tmp_path / 'a'}{os.pathsep}{tmp_path / 'b'}")
     config_module.save(cfg)
-    loaded = config_module.load()
-    assert loaded.sources("music") == [tmp_path / "a", tmp_path / "b"]
-    assert loaded.sources("ambient") == []
+
+    store = _store()
+    assert store.current().name == "Library"
+    assert store.current().sources("music") == [tmp_path / "a", tmp_path / "b"]
+    assert store.current().sources("ambient") == []
 
 
 def test_cli_source_add_list_remove(env, tmp_path, capsys):
@@ -124,7 +127,7 @@ def test_cli_source_add_list_remove(env, tmp_path, capsys):
     (album / "a.mp3").write_bytes(b"\0")
 
     assert main(["source", "add", str(album)]) == 0
-    assert config_module.load().music_sources == [str(album.resolve())]
+    assert _store().current().music_sources == [str(album.resolve())]
     assert main(["source", "add", "--ambient", str(album)]) == 0
     capsys.readouterr()
 
@@ -133,8 +136,15 @@ def test_cli_source_add_list_remove(env, tmp_path, capsys):
     assert "music sources (1)" in out and "ambient sources (1)" in out
 
     assert main(["source", "remove", str(album)]) == 0
-    assert config_module.load().music_sources == []
+    assert _store().current().music_sources == []
     assert (album / "a.mp3").exists()
+
+
+def _store():
+    """The playlist store as it is on disk right now."""
+    from bgsoundtrack import playlists
+
+    return playlists.load(config_module.load())
 
 
 def test_cli_list_marks_source_tracks(env, tmp_path, capsys):

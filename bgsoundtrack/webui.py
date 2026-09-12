@@ -22,7 +22,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from bgsoundtrack import __version__, config as config_module, library, player
+from bgsoundtrack import (
+    __version__,
+    config as config_module,
+    library,
+    player,
+    playlists,
+)
 from bgsoundtrack.service import Session
 
 UI_DIR = Path(__file__).parent / "ui"
@@ -156,6 +162,9 @@ class Handler(BaseHTTPRequestHandler):
         except library.LibraryError as exc:
             self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
+        except playlists.PlaylistError as exc:
+            self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
         except player.PlaybackError as exc:
             self._json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
             return
@@ -192,13 +201,40 @@ class Handler(BaseHTTPRequestHandler):
             path = body.get("path")
             if not path:
                 raise ValueError("link needs a path")
-            return {**session.snapshot(), "result": session.link(
+            result = session.link(
                 path, body.get("section", "music"), bool(body.get("relative"))
-            )}
+            )
+            return {**session.snapshot(), "result": result}
         elif route == "unlink":
             session.unlink(body["name"], body.get("section", "music"))
+        elif route == "remove-track":
+            name = body.get("name")
+            if not name:
+                raise ValueError("remove-track needs a name")
+            result = session.remove_track(name, body.get("section", "music"))
+            return {**session.snapshot(), "result": result}
+        elif route == "restore-track":
+            target = body.get("target")
+            if not target:
+                raise ValueError("restore-track needs a target")
+            result = session.restore_track(target)
+            return {**session.snapshot(), "result": result}
+        elif route == "playlist":
+            action = body.get("action", "select")
+            if action == "select":
+                result = session.select_playlist(body["id"])
+            elif action == "new":
+                result = session.add_playlist(body.get("name", ""), body.get("source"))
+            elif action == "rename":
+                result = session.rename_playlist(body["id"], body.get("name", ""))
+            elif action == "remove":
+                result = session.remove_playlist(body["id"])
+            else:
+                raise ValueError(f"unknown playlist action {action!r}")
+            return {**session.snapshot(), "result": result}
         elif route == "prune":
-            return {**session.snapshot(), "result": session.prune()}
+            result = session.prune()
+            return {**session.snapshot(), "result": result}
         elif route == "source":
             path = body.get("path")
             if not path:
