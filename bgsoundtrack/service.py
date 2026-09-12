@@ -55,6 +55,7 @@ class Session:
         self._history: list[str] = []
         self._backend: player.Backend | None = None
         self._picker_available: bool | None = None
+        self._runner: engine.Engine | None = None
 
     # -- state -----------------------------------------------------------
 
@@ -73,14 +74,8 @@ class Session:
             "players": player.available(),
             "picker": self.picker_available,
             "history": list(self._history[-12:]),
-            "now": None
-            if now is None
-            else {
-                "kind": now.kind,
-                "name": now.name,
-                "duration": now.duration,
-                "elapsed": round(now.elapsed(), 2),
-            },
+            "now": None if now is None else self._describe(now),
+            "hidden": self.config.hide_gaps,
             "config": self.config.to_dict(),
             "counts": {
                 section: len(library.entries(self.config, section, self.playlist))
@@ -112,6 +107,20 @@ class Session:
                 {"target": target, "name": Path(target).name}
                 for target in self.playlist.excluded
             ],
+        }
+
+    def _describe(self, now: NowPlaying) -> dict:
+        """What the UI may know about what is playing.
+
+        In hidden mode the gap's length and progress never leave this process
+        - a countdown you can read is not a silence you can sink into.
+        """
+        hide = self.config.hide_gaps and now.kind != "track"
+        return {
+            "kind": now.kind,
+            "name": now.name,
+            "duration": None if hide else now.duration,
+            "elapsed": None if hide else round(now.elapsed(), 2),
         }
 
     @property
@@ -178,6 +187,7 @@ class Session:
                 store=self.store,
             )
             self._controls = controls
+            self._runner = runner
             self._thread = threading.Thread(
                 target=self._run, args=(runner,), daemon=True, name="bgst-engine"
             )
@@ -238,12 +248,20 @@ class Session:
 
     # -- settings & library ---------------------------------------------
 
-    def update_config(self, values: dict) -> None:
-        """Apply settings and persist them. Changes land on the next gap."""
+    def update_config(self, values: dict) -> bool:
+        """Apply settings and persist them. Changes land on the next gap.
+
+        Volume is the exception: it is pushed at the playing track straight
+        away. Returns whether that worked - on a desktop without a usable
+        mixer it only applies from the next track.
+        """
         for key, value in values.items():
             config_module.set_value(self.config, key, value)
         self.config.validate()
         config_module.save(self.config, self.config_path)
+        if self._runner and {"volume", "ambient_volume"} & set(values):
+            return self._runner.live_volume()
+        return True
 
     def link(self, path: str, section: str = "music", relative: bool = False) -> dict:
         library.init(self.config, self.playlist)
@@ -282,6 +300,16 @@ class Session:
         self.store.save()
         self.store.touch()
         return str(path)
+
+    def ban(self) -> dict:
+        """Skip this track and take it out of the playlist, in one go."""
+        now = self._now
+        if now is None or not now.path:
+            raise library.LibraryError("nothing is playing")
+        section = "ambient" if now.kind == "ambient" else "music"
+        result = self.remove_track(Path(now.path).name, section)
+        self.skip()
+        return result
 
     def prune(self) -> list[str]:
         return [p.name for p in library.prune(self.config, playlist=self.playlist)]

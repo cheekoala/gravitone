@@ -3,7 +3,14 @@
 #
 #   ./install.sh                 install for the current user
 #   ./install.sh --with-player   also install an audio player (asks first)
+#   ./install.sh --shortcut      add menu and desktop shortcuts without asking
+#   ./install.sh --no-shortcut   skip the shortcuts
 #   ./install.sh --uninstall     remove it again
+#
+# Double-clicking this in Dolphin, Nautilus or Thunar runs it with no terminal
+# attached, so everything it prints goes nowhere and it looks like nothing
+# happened. When that is the case it reopens itself in a terminal window; pass
+# --no-terminal to stop that.
 #
 # Nothing here needs root except an optional player install through your own
 # package manager, which is always shown before it runs.
@@ -27,14 +34,48 @@ die()  { warn "$*"; exit 1; }
 
 WITH_PLAYER=0
 UNINSTALL=0
+SHORTCUT=ask
+REOPEN=1
 for arg in "$@"; do
   case "$arg" in
     --with-player) WITH_PLAYER=1 ;;
     --uninstall) UNINSTALL=1 ;;
-    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --shortcut) SHORTCUT=yes ;;
+    --no-shortcut) SHORTCUT=no ;;
+    --no-terminal) REOPEN=0 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option: $arg" ;;
   esac
 done
+
+# -- run somewhere the output can be read ----------------------------------
+# A file manager launches this with no terminal: stdout is not a tty and
+# nothing is visible. Reopen in a terminal emulator so the install can be
+# watched (and so the questions below can be answered).
+open_in_terminal() {
+  [ "$REOPEN" -eq 1 ] || return 1
+  [ -t 1 ] && return 1
+  [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || return 1
+  [ -n "${BGST_REOPENED:-}" ] && return 1
+
+  for term in konsole gnome-terminal xfce4-terminal ptyxis kitty alacritty foot xterm x-terminal-emulator; do
+    command -v "$term" >/dev/null 2>&1 || continue
+    BGST_REOPENED=1
+    export BGST_REOPENED
+    inner="'$SRC/$(basename "$0")' $* ; printf '\nPress Enter to close '; read -r _"
+    case "$term" in
+      gnome-terminal|ptyxis) "$term" -- sh -c "$inner" ;;
+      konsole|xfce4-terminal) "$term" -e sh -c "$inner" ;;
+      *) "$term" -e sh -c "$inner" ;;
+    esac
+    return 0
+  done
+  return 1
+}
+
+if [ "$UNINSTALL" -eq 0 ] && open_in_terminal "$@"; then
+  exit 0
+fi
 
 # -- python ----------------------------------------------------------------
 find_python() {
@@ -54,6 +95,9 @@ if [ "$UNINSTALL" -eq 1 ]; then
   rm -f "$BIN/$APP"
   rm -rf "$VENV"
   rm -f "$HOME/.local/share/applications/bgst.desktop"
+  rm -f "$HOME/Desktop/bgst.desktop"
+  DESKTOP_DIR=$( (command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP) || echo "$HOME/Desktop")
+  rm -f "$DESKTOP_DIR/bgst.desktop"
   say "Removed. Your library and config were left alone:"
   say "  ${DIM}~/.local/share/custom soundtrack${OFF}   ${DIM}~/.config/bgsoundtrack${OFF}"
   exit 0
@@ -129,12 +173,38 @@ if ! "$PYTHON" -c 'import tkinter' >/dev/null 2>&1; then
   esac
 fi
 
-# -- desktop entry (Linux) -------------------------------------------------
-if [ "$(uname -s)" = "Linux" ] && [ -f "$SRC/packaging/bgst.desktop" ]; then
+# -- shortcuts (Linux) -----------------------------------------------------
+install_shortcuts() {
   APPS="$HOME/.local/share/applications"
   mkdir -p "$APPS"
   sed "s|Exec=bgst ui|Exec=$BIN/$APP ui|" "$SRC/packaging/bgst.desktop" > "$APPS/bgst.desktop"
-  step "Added a desktop entry"
+  chmod +x "$APPS/bgst.desktop"
+  step "Added bgst to your application menu"
+
+  DESKTOP_DIR=$( (command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP) || echo "$HOME/Desktop")
+  if [ -d "$DESKTOP_DIR" ]; then
+    cp "$APPS/bgst.desktop" "$DESKTOP_DIR/bgst.desktop"
+    chmod +x "$DESKTOP_DIR/bgst.desktop"
+    # KDE refuses to run a desktop file it does not trust; this is the flag
+    # Plasma sets when you click "Trust this executable".
+    command -v kwriteconfig5 >/dev/null 2>&1 && \
+      kwriteconfig5 --file "$DESKTOP_DIR/bgst.desktop" --group "Desktop Entry" \
+        --key "X-KDE-AuthorizeExecute" "true" 2>/dev/null || true
+    step "Put a shortcut on your desktop"
+  fi
+}
+
+if [ "$(uname -s)" = "Linux" ] && [ -f "$SRC/packaging/bgst.desktop" ]; then
+  case "$SHORTCUT" in
+    yes) install_shortcuts ;;
+    no) ;;
+    *)
+      say ""
+      printf 'Add bgst to your application menu and desktop? [Y/n] '
+      if [ -t 0 ]; then read -r reply; else reply=y; fi
+      case "$reply" in [nN]*) say "Skipped." ;; *) install_shortcuts ;; esac
+      ;;
+  esac
 fi
 
 # -- PATH ------------------------------------------------------------------

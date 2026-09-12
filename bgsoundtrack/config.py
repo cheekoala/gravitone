@@ -11,6 +11,9 @@ import os
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
+# The longest gap the UI offers: an hour of quiet between two songs.
+MAX_GAP = 3600.0
+
 MUSIC_DIRNAME = "music"
 AMBIENT_DIRNAME = "ambient"
 
@@ -70,6 +73,12 @@ class Config:
     volume: int = 70
     ambient_volume: int = 45
     loop: bool = True
+    # Start an ambient bed somewhere in the middle of the file, so the same
+    # rain loop does not open with the same three seconds every time.
+    ambient_random_start: bool = True
+    # Hidden mode: never say how long a gap is or how much of it is left.
+    # The wait is the point; a countdown ruins it.
+    hide_gaps: bool = False
 
     # Folders played in place. An alternative to linking: nothing is added to
     # the library folder, the tree is simply scanned every time it is needed,
@@ -109,6 +118,8 @@ class Config:
             raise ValueError("gap_min must be >= 0")
         if self.gap_max < self.gap_min:
             raise ValueError("gap_max must be >= gap_min")
+        if self.gap_max > MAX_GAP:
+            raise ValueError(f"gap_max must be <= {MAX_GAP} seconds (one hour)")
         if not 0.0 <= self.ambient_chance <= 1.0:
             raise ValueError("ambient_chance must be between 0 and 1")
         for name in ("volume", "ambient_volume"):

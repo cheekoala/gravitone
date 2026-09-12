@@ -74,6 +74,15 @@
       ? clock(config.gap_min)
       : `${clock(config.gap_min)}–${clock(config.gap_max)}`;
 
+  async function ban() {
+    const done = await call("ban", {});
+    if (!done) return;
+    invalidate();
+    toast(done.result.how === "unlinked"
+      ? `Banned ${done.result.name} — unlinked and skipped`
+      : `Banned ${done.result.name} — out of this playlist, file untouched`);
+  }
+
   // -- render ---------------------------------------------------------
   function render(next) {
     state = next;
@@ -83,21 +92,27 @@
     $("transport").dataset.on = String(running);
     $("transport-label").textContent = running ? "Live" : "Play";
     $("skip").disabled = !running;
+    $("ban").disabled = !running || !now || now.kind === "silence";
 
     const nowPanel = $("panel-now");
-    nowPanel.classList.toggle("is-gap", !!now && now.kind !== "track");
+    const inGap = !!now && now.kind !== "track";
+    nowPanel.classList.toggle("is-gap", inGap);
+    // The server withholds gap times in hidden mode; there is nothing to show.
+    nowPanel.classList.toggle("is-hidden", inGap && next.hidden);
     const kinds = { track: "Now playing", ambient: "Ambience", silence: "Silence" };
     $("now-kind").textContent = now ? kinds[now.kind] : (running ? "Starting" : "Idle");
     $("now-title").textContent = now
       ? (now.kind === "silence" ? "Quiet" : now.name)
       : (next.error ? "Stopped" : "Nothing playing");
+    const hiddenNow = inGap && next.hidden;
     const pct = now && now.duration ? Math.min(100, (now.elapsed / now.duration) * 100) : 0;
-    $("now-progress").style.width = `${pct}%`;
-    $("now-elapsed").textContent = now ? clock(now.elapsed) : "0:00";
-    $("now-remaining").textContent =
-      now && now.duration ? `-${clock(now.duration - now.elapsed)}` : "";
+    $("now-progress").style.width = hiddenNow ? "100%" : `${pct}%`;
+    $("now-elapsed").textContent = hiddenNow ? "— — —" : (now ? clock(now.elapsed) : "0:00");
+    $("now-remaining").textContent = hiddenNow
+      ? "hidden"
+      : (now && now.duration ? `-${clock(now.duration - now.elapsed)}` : "");
 
-    $("stat-gap").textContent = humanGap(config);
+    $("stat-gap").textContent = next.hidden ? "hidden" : humanGap(config);
     $("stat-ambient").textContent = `${Math.round(config.ambient_chance * 100)}%`;
 
     const history = $("history");
@@ -293,22 +308,71 @@
     });
   }
 
+  // Gaps run from 0 to an hour. A linear slider would put every useful
+  // value in the first centimetre, so the travel is curved: fine control
+  // down at 10-60s, coarse up in the tens of minutes.
+  const MAX_GAP = 3600;
+  const CURVE = 3;
+  const gapFromSlider = (pos) => Math.round(MAX_GAP * Math.pow(pos / 1000, CURVE));
+  const sliderFromGap = (seconds) =>
+    Math.round(1000 * Math.pow(Math.min(MAX_GAP, Math.max(0, seconds)) / MAX_GAP, 1 / CURVE));
+
+  const humanSeconds = (value) => {
+    const seconds = Math.round(value);
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const rest = seconds % 60;
+    return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  };
+
+  // "90", "90s", "3m", "2m30", "1m 30s", "1:30" all mean what they look like.
+  function parseSeconds(text) {
+    const value = String(text).trim().toLowerCase();
+    if (!value) return null;
+    let match = value.match(/^(\d+):(\d{1,2})$/);
+    if (match) return Number(match[1]) * 60 + Number(match[2]);
+    match = value.match(/^(?:(\d+)\s*m)?\s*(?:(\d+)\s*s?)?$/);
+    if (!match || (match[1] === undefined && match[2] === undefined)) return null;
+    return Number(match[1] || 0) * 60 + Number(match[2] || 0);
+  }
+
+  const GAPS = ["gap_min", "gap_max"];
   const SLIDERS = {
-    gap_min: (v) => `${v}s`,
-    gap_max: (v) => `${v}s`,
+    gap_min: humanSeconds,
+    gap_max: humanSeconds,
     ambient_chance: (v) => `${v}%`,
     volume: (v) => `${v}`,
     ambient_volume: (v) => `${v}`,
   };
 
+  const isGap = (key) => GAPS.includes(key);
+  const setReadout = (key, value) => {
+    const node = $(`${key}-out`);
+    if (isGap(key)) node.value = SLIDERS[key](value);
+    else node.textContent = SLIDERS[key](value);
+  };
+
   function syncSettings(config) {
     Object.keys(SLIDERS).forEach((key) => {
-      const value = key === "ambient_chance" ? Math.round(config[key] * 100) : Math.round(config[key]);
-      $(key).value = value;
-      $(`${key}-out`).textContent = SLIDERS[key](value);
+      if (document.activeElement === $(`${key}-out`)) return;   // mid-typing
+      const raw = key === "ambient_chance" ? config[key] * 100 : config[key];
+      const value = Math.round(raw);
+      $(key).value = isGap(key) ? sliderFromGap(value) : value;
+      setReadout(key, value);
     });
     $("shuffle").checked = config.shuffle;
     $("loop").checked = config.loop;
+    $("hide_gaps").checked = config.hide_gaps;
+    $("ambient_random_start").checked = config.ambient_random_start;
+  }
+
+  // Keep min <= max whichever one moved, so the server never rejects a pair.
+  function gapPatch(key, seconds) {
+    const patch = { [key]: seconds };
+    if (!state) return patch;
+    if (key === "gap_min" && seconds > state.config.gap_max) patch.gap_max = seconds;
+    if (key === "gap_max" && seconds < state.config.gap_min) patch.gap_min = seconds;
+    return patch;
   }
 
   // -- libraries (fetched on demand, not in every poll) ----------------
@@ -480,6 +544,7 @@
 
   $("transport").addEventListener("click", () => call("toggle", {}));
   $("skip").addEventListener("click", () => call("skip", {}));
+  $("ban").addEventListener("click", ban);
   $("pick-folder").addEventListener("click", chooseFolder);
   $("path-form").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -517,25 +582,47 @@
   Object.keys(SLIDERS).forEach((key) => {
     const input = $(key);
     input.addEventListener("input", () => {
-      $(`${key}-out`).textContent = SLIDERS[key](input.value);
+      setReadout(key, isGap(key) ? gapFromSlider(Number(input.value)) : Number(input.value));
     });
-    input.addEventListener("change", () => {
+    input.addEventListener("change", async () => {
       const raw = Number(input.value);
-      const value = key === "ambient_chance" ? raw / 100 : raw;
-      // Keep the range coherent so the server never rejects the pair.
-      const patch = { [key]: value };
-      if (key === "gap_min" && state && raw > state.config.gap_max) patch.gap_max = raw;
-      if (key === "gap_max" && state && raw < state.config.gap_min) patch.gap_min = raw;
-      call("config", patch);
+      if (isGap(key)) {
+        await call("config", gapPatch(key, gapFromSlider(raw)));
+        return;
+      }
+      const done = await call("config", { [key]: key === "ambient_chance" ? raw / 100 : raw });
+      if (done && done.live === false && key.endsWith("volume") && state.running) {
+        toast("Volume applies from the next track — no system mixer here");
+      }
     });
   });
-  ["shuffle", "loop"].forEach((key) =>
+
+  GAPS.forEach((key) => {
+    const box = $(`${key}-out`);
+    const commit = async () => {
+      const seconds = parseSeconds(box.value);
+      if (seconds === null || seconds > MAX_GAP) {
+        setReadout(key, state ? state.config[key] : 0);
+        if (seconds !== null) toast(`The longest gap is ${humanSeconds(MAX_GAP)}`, true);
+        return;
+      }
+      await call("config", gapPatch(key, seconds));
+    };
+    box.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); box.blur(); }
+      if (event.key === "Escape") { setReadout(key, state.config[key]); box.blur(); }
+    });
+    box.addEventListener("blur", commit);
+  });
+
+  ["shuffle", "loop", "hide_gaps", "ambient_random_start"].forEach((key) =>
     $(key).addEventListener("change", () => call("config", { [key]: $(key).checked })));
 
   document.addEventListener("keydown", (event) => {
     if (event.target.matches("input, textarea")) return;
     if (event.key === " ") { event.preventDefault(); call("toggle", {}); }
     if (event.key === "n") call("skip", {});
+    if (event.key === "b") ban();
   });
 
   // -- polling --------------------------------------------------------

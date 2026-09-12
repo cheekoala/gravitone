@@ -315,11 +315,15 @@ def _apply_play_overrides(config: Config, args) -> None:
         config.loop = False
     if args.no_ambient:
         config.ambient_chance = 0.0
+    if args.hidden:
+        config.hide_gaps = True
+    if args.no_random_start:
+        config.ambient_random_start = False
     config.validate()
 
 
-def _key_listener(controls: engine.Controls) -> None:
-    """Single-key controls when we own a terminal: n = next, q = quit."""
+def _key_listener(controls: engine.Controls, on_ban=None) -> None:
+    """Single-key controls when we own a terminal: n next, b ban, q quit."""
     try:
         import termios
         import tty
@@ -338,6 +342,8 @@ def _key_listener(controls: engine.Controls) -> None:
                 break
             if char in ("n", "s"):
                 controls.skip()
+            elif char == "b" and on_ban is not None:
+                on_ban()
             elif char == "q":
                 controls.stop()
                 break
@@ -399,20 +405,44 @@ def cmd_play(args) -> int:
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
     runner = engine.Engine(config, backend, rng=rng, controls=controls, store=store)
 
+    playing = {"path": None, "kind": None}
+
     def on_event(event: engine.Event) -> None:
+        playing["path"], playing["kind"] = event.path, event.kind
+        # Hidden mode: say that a gap is happening, never how long it runs.
+        length = "" if config.hide_gaps else f" ({_fmt(event.duration)})"
         if event.kind == "track":
             print(f"♪ {event.path.name}", flush=True)
         elif event.kind == "ambient":
-            print(f"  ~ {event.path.name} ({_fmt(event.duration)})", flush=True)
+            print(f"  ~ {event.path.name}{length}", flush=True)
         elif event.kind == "silence":
-            print(f"  . silence ({_fmt(event.duration)})", flush=True)
+            print(f"  . silence{length}", flush=True)
         elif event.kind == "done":
             print("stopped", flush=True)
 
+    def ban() -> None:
+        path, kind = playing["path"], playing["kind"]
+        if path is None or kind not in ("track", "ambient"):
+            return
+        section = "ambient" if kind == "ambient" else "music"
+        try:
+            how, _ = library.remove_track(config, path.name, section=section, playlist=playlist)
+        except library.LibraryError as exc:
+            print(f"  ! {exc}", flush=True)
+            return
+        store.save()
+        print(f"  ✂ {how} {path.name} from {playlist.name}", flush=True)
+        controls.skip()
+
     interactive = sys.stdin.isatty() and not args.no_keys
     if interactive:
-        print(f"playing {playlist.name} with {backend.name} - n: next, q: quit")
-        threading.Thread(target=_key_listener, args=(controls,), daemon=True).start()
+        print(
+            f"playing {playlist.name} with {backend.name} - "
+            "n: next, b: ban (skip and remove), q: quit"
+        )
+        threading.Thread(
+            target=_key_listener, args=(controls, ban), daemon=True
+        ).start()
 
     try:
         runner.run(on_event)
@@ -543,6 +573,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-loop", action="store_true", help="stop after one pass")
     p.add_argument("--no-ambient", action="store_true", help="silent gaps only")
     p.add_argument("--no-keys", action="store_true", help="disable keyboard controls")
+    p.add_argument(
+        "--hidden", action="store_true", help="never show how long a gap lasts"
+    )
+    p.add_argument(
+        "--no-random-start",
+        dest="no_random_start",
+        action="store_true",
+        help="always start ambient tracks from the beginning",
+    )
     p.add_argument("--player", help="force a backend (ffplay, mpv, afplay, vlc)")
     p.add_argument("--seed", type=int, help="deterministic shuffle and gaps")
     p.set_defaults(func=cmd_play)

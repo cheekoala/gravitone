@@ -188,10 +188,12 @@ class Store:
             "playlists": [p.to_dict() for p in self.playlists],
         }
 
-    def save(self, path: Path = None) -> Path:
+    def save(self, path: Path = None) -> Path | None:
+        """Write the playlists out. A store with no file (one built in memory,
+        or the engine's stand-in) has nothing to write, and says so quietly."""
         target = path or self.path
         if target is None:
-            raise PlaylistError("nowhere to save playlists")
+            return None
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(self.to_dict(), indent=2) + "\n", encoding="utf-8")
         self.path = target

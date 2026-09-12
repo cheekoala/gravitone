@@ -17,13 +17,14 @@ silence or a bed of ambience (wind, rain, tavern noise, crickets).
   Nothing is ever copied.
 - **A separate `ambient` folder and ambient sources** for loops and atmosphere.
 - **Random gaps with sane defaults** — 12–45 s, 65 % of them ambient, the rest
-  silence — all tunable.
+  silence — tunable anywhere from none to a full hour, and hideable if you
+  would rather not know how long the quiet lasts.
 - **A tiny control panel** (`bgst ui`) that runs in your browser, or on your
   phone as a remote — no Electron, no build step, no dependencies.
 - **No Python dependencies.** Playback goes through `ffplay`, `mpv`, `afplay`
   or `vlc`, whichever you have.
 
-![The bgst control panel, playing a track](docs/ui-now.png)
+![The bgst control panel: ambience playing in hidden mode, with the ban button open](docs/ui-now.png)
 
 ## Install
 
@@ -52,6 +53,17 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```sh
 pipx install .          # or: pip install --user .
 ```
+
+The installer offers to add a menu entry and a desktop shortcut (`--shortcut`
+/ `--no-shortcut` to decide up front; `-Shortcut` / `-NoShortcut` on Windows).
+
+**Double-clicking `install.sh` in Dolphin, Nautilus or Thunar** used to look
+like nothing happened: a file manager runs an executable script with no
+terminal attached, so everything it prints goes to a pipe nobody reads, and
+its questions have nowhere to appear. It now notices it has no terminal and
+reopens itself in one (konsole, gnome-terminal, xfce4-terminal, kitty,
+alacritty, foot, xterm — whichever you have), so you can watch the install and
+answer its two questions. `--no-terminal` keeps it in place.
 
 Uninstall with `./install.sh --uninstall` / `.\install.ps1 -Uninstall`; both
 leave your library and config alone. `make help` lists the same tasks for
@@ -82,7 +94,8 @@ bgst link ~/Music/Outer\ Wilds               # or link track by track
 bgst play
 ```
 
-While playing in a terminal: `n` skips to the next track, `q` quits.
+While playing in a terminal: `n` skips, `b` bans (skip and drop it from this
+playlist), `q` quits.
 
 ```
 ♪ Ashes.flac
@@ -115,7 +128,7 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
   create) and this playlist's source folders and removed tracks. Changes save
   immediately and take effect from the next gap; no need to restart playback.
 
-Keys: `space` play/stop, `n` next. Every API call needs the token in the URL,
+Keys: `space` play/stop, `n` next, `b` ban. Every API call needs the token in the URL,
 so another page in your browser cannot drive your player or read your disk.
 
 Run it as a phone remote for the machine that's playing:
@@ -196,6 +209,7 @@ one to drop a track. The player ignores non-audio files and dangling links.
 | `bgst source add\|remove\|list` | play whole folders in place (`--ambient`) |
 | `bgst playlist list\|new\|use\|rename\|remove` | switch between sets of music |
 | `bgst playlist removed\|restore` | see and undo removals in this playlist |
+| `bgst play --hidden` | play without ever showing gap lengths |
 | `bgst unlink NAME...` | remove entries (only ever deletes symlinks, never real files) |
 | `bgst list --targets` | show the library and what each link points at |
 | `bgst prune` | drop links whose target moved or was deleted |
@@ -210,6 +224,16 @@ On Windows, symlinks need Developer Mode (Settings → System → For developers
 Without it `bgst` falls back to hard links, which also cost no extra space but
 cannot cross drives.
 
+## Ban
+
+`Ban` grows out of the skip button (and answers to `b`): it skips the track
+*and* takes it out of the current playlist, in one press — the same removal
+the `✕` does, so a source track is only remembered as gone and the file is
+never touched. Undo it in Config → *Removed from this playlist*.
+
+Ban during ambience bans the ambient track instead. During silence there is
+nothing to ban.
+
 ## Gaps between songs
 
 Every song is followed by a gap of a random length between `gap_min` and
@@ -220,13 +244,30 @@ smear of rain sounds like a mistake.
 
 | Setting | Default | |
 | --- | --- | --- |
-| `gap_min` / `gap_max` | `12` / `45` | gap length range, seconds |
+| `gap_min` / `gap_max` | `12` / `45` | gap length range, seconds — up to `3600` (an hour) |
 | `ambient_chance` | `0.65` | share of gaps that get ambience |
 | `ambient_min_tail` | `3.0` | shortest gap worth filling with ambience |
+| `ambient_random_start` | `true` | drop into an ambient track at a random point |
+| `hide_gaps` | `false` | hidden mode: never show how long a gap runs |
 | `volume` / `ambient_volume` | `70` / `45` | ambience sits under the music |
 | `shuffle` | `true` | shuffled passes; no repeat until all have played |
 | `loop` | `true` | start a new pass when the list is exhausted |
 | `root` | `~/.local/share/custom soundtrack` | library location |
+
+The gap sliders reach an hour on a curved scale, so the first third of the
+travel still covers 0–60 s. Type an exact value into the box beside them
+instead if you prefer: `90`, `90s`, `3m`, `2m30`, `1:30` all work.
+
+**Hidden mode** (`hide_gaps`, or `bgst play --hidden`) withholds gap lengths
+*server-side* — the browser is never told how long the quiet is or how much is
+left, so there is no countdown to watch and nothing to peek at in the network
+tab. Songs still show their progress.
+
+**Ambient start points** are randomised by default, so a twenty-minute rain
+recording doesn't open on the same three seconds every time. It needs
+`ffprobe` (part of ffmpeg) to know how long the file is; without it, ambience
+starts at the top. The offset always leaves enough track to cover the whole
+gap.
 
 Change them for good, or just for one session:
 
@@ -253,6 +294,22 @@ them per command — handy for a separate library per game.
 | Runtime | Python 3.9+, standard library only |
 | File chooser | your desktop's own, when Tk is installed; a built-in browser otherwise |
 | UI | any browser, including a phone on the same network |
+
+## Volume
+
+The in-app sliders drive the **system mixer** (PulseAudio / PipeWire, via
+`pactl`) for the track that is playing right now, and fall back to the
+player's own volume flag for the next one. That matters because `ffplay`
+reads `-volume` once at startup and offers no way to change it afterwards —
+which is why, before this, moving the app slider mid-song did nothing on
+Fedora/Plasma while the desktop's own mixer worked fine.
+
+Players are also tagged as `bgst` (`PULSE_PROP_application.name`), so your
+desktop's volume mixer shows one **bgst** entry to ride rather than a new
+`ffplay` appearing for every song.
+
+If `pactl` is missing (a pure-ALSA box, macOS, Windows), a volume change
+applies from the next track and the UI says so.
 
 ## Tests
 

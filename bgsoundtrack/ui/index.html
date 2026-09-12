@@ -22,9 +22,15 @@
       <span class="brand-sub" id="root-path"></span>
     </div>
     <div class="topbar-actions">
-      <button class="ghost" id="skip" title="Next track (N)" disabled>
-        <svg viewBox="0 0 24 24" class="icon"><path d="M6 5l9 7-9 7V5z"/><rect x="16" y="5" width="2.4" height="14" rx="1"/></svg>
-      </button>
+      <div class="skip-group" id="skip-group">
+        <button class="ghost" id="skip" title="Next track (N)" disabled>
+          <svg viewBox="0 0 24 24" class="icon"><path d="M6 5l9 7-9 7V5z"/><rect x="16" y="5" width="2.4" height="14" rx="1"/></svg>
+        </button>
+        <button class="ghost ban" id="ban" title="Ban: skip and remove from this playlist (B)" disabled>
+          <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="8.4"/><path d="M6.2 6.2l11.6 11.6"/></svg>
+          <span>Ban</span>
+        </button>
+      </div>
       <button class="live" id="transport" data-on="false">
         <span class="live-dot"></span><span id="transport-label">Play</span>
       </button>
@@ -150,11 +156,15 @@
         <div class="card">
           <div class="kicker">Gaps</div>
           <label class="field"><span>Shortest gap</span>
-            <input type="range" id="gap_min" min="0" max="300" step="1"><output id="gap_min-out"></output></label>
+            <input type="range" id="gap_min" min="0" max="1000" step="1">
+            <input class="value" type="text" id="gap_min-out" inputmode="numeric" spellcheck="false"></label>
           <label class="field"><span>Longest gap</span>
-            <input type="range" id="gap_max" min="0" max="600" step="1"><output id="gap_max-out"></output></label>
+            <input type="range" id="gap_max" min="0" max="1000" step="1">
+            <input class="value" type="text" id="gap_max-out" inputmode="numeric" spellcheck="false"></label>
           <label class="field"><span>Ambience chance</span>
             <input type="range" id="ambient_chance" min="0" max="100" step="5"><output id="ambient_chance-out"></output></label>
+          <label class="switch"><input type="checkbox" id="hide_gaps"><span class="track"></span>Hidden mode — never show how long a gap lasts</label>
+          <label class="switch"><input type="checkbox" id="ambient_random_start"><span class="track"></span>Start ambient tracks at a random point</label>
         </div>
         <div class="card">
           <div class="kicker">Levels</div>

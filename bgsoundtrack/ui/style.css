@@ -102,6 +102,27 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
 .rail-btn .icon, .topbar .icon { display: block; }
 #skip .icon { fill: currentColor; stroke: none; }
 
+/* The ban button grows out of the skip button: same shape, opens on hover,
+   focus, or while a track is playing on a touch screen. */
+.skip-group { display: flex; align-items: center; }
+.skip-group #skip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.ban {
+  display: flex; align-items: center; gap: 5px; overflow: hidden;
+  max-width: 0; padding-left: 0; padding-right: 0; border-left-width: 0;
+  border-top-left-radius: 0; border-bottom-left-radius: 0;
+  color: #ffa8ab; white-space: nowrap;
+  transition: max-width .18s ease, padding .18s ease, opacity .18s ease;
+  opacity: 0;
+}
+.ban span { font-size: 12.5px; }
+.skip-group:hover .ban, .skip-group:focus-within .ban {
+  max-width: 110px; padding-left: 9px; padding-right: 11px; opacity: 1;
+}
+.ban:hover:not(:disabled) { background: rgba(229,72,77,.14); border-color: rgba(229,72,77,.5); }
+@media (hover: none) {
+  .skip-group .ban { max-width: 110px; padding-left: 9px; padding-right: 11px; opacity: 1; }
+}
+
 /* -- layout -------------------------------------------------------- */
 .body { display: flex; flex: 1; min-height: 0; }
 
@@ -146,6 +167,15 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   transition: width .35s linear;
 }
 .panel.is-gap .progress-fill { background: var(--select); }
+/* Hidden mode: a gap is happening, but not for how long. */
+.panel.is-hidden .progress-fill {
+  width: 100% !important; opacity: .35;
+  background: linear-gradient(90deg, transparent, var(--select), transparent);
+  background-size: 40% 100%; background-repeat: no-repeat;
+  animation: drift 4.5s ease-in-out infinite;
+}
+@keyframes drift { 0% { background-position: -40% 0; } 100% { background-position: 140% 0; } }
+
 .now-meta {
   display: flex; justify-content: space-between; margin-top: 8px;
   font: 11px/1 var(--mono); color: var(--faint);
@@ -208,6 +238,12 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
 .field:last-child { margin-bottom: 0; }
 .field > span { color: var(--muted); font-size: 12.5px; }
 .field output { font: 11.5px/1 var(--mono); color: var(--text); text-align: right; }
+.field input.value {
+  font: 11.5px/1 var(--mono); color: var(--text); text-align: right;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: 5px 6px; width: 100%; min-width: 0;
+}
+.field input.value:focus { outline: none; border-color: var(--select); }
 input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 999px; background: #24242a; }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;

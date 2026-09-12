@@ -11,6 +11,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from bgsoundtrack import mixer
+
 
 class PlaybackError(Exception):
     pass
@@ -21,7 +23,13 @@ class Backend:
     name: str
     executable: str
 
-    def command(self, path: Path, volume: int, duration: float | None) -> list[str]:
+    def command(
+        self,
+        path: Path,
+        volume: int,
+        duration: float | None,
+        start: float | None = None,
+    ) -> list[str]:
         if self.name == "ffplay":
             cmd = [
                 self.executable,
@@ -33,6 +41,8 @@ class Backend:
                 "-volume",
                 str(volume),
             ]
+            if start:
+                cmd += ["-ss", f"{start:.3f}"]
             if duration is not None:
                 cmd += ["-t", f"{duration:.3f}"]
             return cmd + [str(path)]
@@ -44,10 +54,13 @@ class Backend:
                 "--no-terminal",
                 f"--volume={volume}",
             ]
+            if start:
+                cmd.append(f"--start={start:.3f}")
             if duration is not None:
                 cmd.append(f"--length={duration:.3f}")
             return cmd + [str(path)]
         if self.name == "afplay":
+            # afplay has no seek flag, so a start offset is simply ignored.
             cmd = [self.executable, "-v", f"{volume / 100:.3f}"]
             if duration is not None:
                 cmd += ["-t", f"{duration:.3f}"]
@@ -62,8 +75,10 @@ class Backend:
                 "--play-and-exit",
                 f"--gain={volume / 100:.3f}",
             ]
+            if start:
+                cmd += ["--start-time", f"{start:.0f}"]
             if duration is not None:
-                cmd += ["--run-time", f"{duration:.0f}", "--stop-time", f"{duration:.0f}"]
+                cmd += ["--run-time", f"{duration:.0f}"]
             return cmd + [str(path)]
         raise PlaybackError(f"unsupported backend {self.name!r}")
 
@@ -102,6 +117,17 @@ class Playback:
         self.process = process
         self.path = path
 
+    def set_volume(self, volume: int) -> bool:
+        """Change the volume of this playing track, if the desktop allows it.
+
+        The player's own `-volume` flag is read once at startup, so this goes
+        through the system mixer instead. False means nothing could be
+        changed and the new level will apply from the next track.
+        """
+        if self.process.poll() is not None:
+            return False
+        return mixer.set_volume(self.process.pid, volume)
+
     def wait(self, timeout: float | None = None) -> int | None:
         try:
             return self.process.wait(timeout=timeout)
@@ -124,23 +150,43 @@ class Playback:
 
 
 def play(
-    backend: Backend, path: Path, volume: int = 70, duration: float | None = None
+    backend: Backend,
+    path: Path,
+    volume: int = 70,
+    duration: float | None = None,
+    start: float | None = None,
 ) -> Playback:
-    command = backend.command(path, volume, duration)
+    command = backend.command(path, volume, duration, start)
     try:
         process = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=mixer.environment(),
         )
     except OSError as exc:
         raise PlaybackError(f"could not start {backend.name}: {exc}") from exc
     return Playback(process, path)
 
 
+_durations: dict = {}
+
+
 def probe_duration(path: Path) -> float | None:
-    """Track length in seconds via ffprobe, or None if unavailable."""
+    """Track length in seconds via ffprobe, or None if unavailable.
+
+    Cached per file (by size and mtime), since picking a random start point
+    asks for the same handful of ambient tracks over and over.
+    """
+    try:
+        info = path.stat()
+        key = (str(path), info.st_size, int(info.st_mtime))
+    except OSError:
+        return None
+    if key in _durations:
+        return _durations[key]
+
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
         return None
@@ -166,4 +212,6 @@ def probe_duration(path: Path) -> float | None:
         value = float(out.stdout.strip())
     except ValueError:
         return None
-    return value if value > 0 else None
+    value = value if value > 0 else None
+    _durations[key] = value
+    return value

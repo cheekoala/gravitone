@@ -14,6 +14,8 @@
 param(
   [switch]$WithPlayer,
   [switch]$Uninstall,
+  [switch]$Shortcut,
+  [switch]$NoShortcut,
   [string]$Venv = "$env:LOCALAPPDATA\bgst\venv"
 )
 
@@ -29,6 +31,8 @@ if ($Uninstall) {
   Step 'Removing bgst'
   if (Test-Path $Venv) { Remove-Item -Recurse -Force $Venv }
   if (Test-Path $startMenu) { Remove-Item -Force $startMenu }
+  $desktopLink = Join-Path ([Environment]::GetFolderPath('Desktop')) 'bgst.lnk'
+  if (Test-Path $desktopLink) { Remove-Item -Force $desktopLink }
   Get-ChildItem "$shims\bgst.*" -ErrorAction SilentlyContinue | Remove-Item -Force
   Write-Host 'Removed. Your library and config were left alone.'
   return
@@ -94,17 +98,27 @@ if ($havePlayer) {
   }
 }
 
-# -- start menu shortcut --------------------------------------------------
-try {
+# -- shortcuts ------------------------------------------------------------
+function Add-Shortcuts {
   $shell = New-Object -ComObject WScript.Shell
-  $link = $shell.CreateShortcut($startMenu)
-  $link.TargetPath = Join-Path $Venv 'Scripts\pythonw.exe'
-  $link.Arguments = '-m bgsoundtrack ui'
-  $link.Description = 'bgst - custom game soundtrack player'
-  $link.Save()
-  Step 'Added a Start Menu shortcut'
-} catch {
-  Warn "Could not create the Start Menu shortcut: $_"
+  foreach ($target in @($startMenu, (Join-Path ([Environment]::GetFolderPath('Desktop')) 'bgst.lnk'))) {
+    $link = $shell.CreateShortcut($target)
+    $link.TargetPath = Join-Path $Venv 'Scripts\pythonw.exe'
+    $link.Arguments = '-m bgsoundtrack ui'
+    $link.Description = 'bgst - custom game soundtrack player'
+    $link.Save()
+  }
+  Step 'Added Start Menu and desktop shortcuts'
+}
+
+$wantShortcuts = $true
+if ($NoShortcut) { $wantShortcuts = $false }
+elseif (-not $Shortcut) {
+  $reply = Read-Host 'Add Start Menu and desktop shortcuts? [Y/n]'
+  if ($reply -match '^[nN]') { $wantShortcuts = $false }
+}
+if ($wantShortcuts) {
+  try { Add-Shortcuts } catch { Warn "Could not create the shortcuts: $_" }
 }
 
 # -- symlink note ---------------------------------------------------------

@@ -35,8 +35,10 @@ class FakeProcess:
 def fake_player(monkeypatch):
     calls = []
 
-    def fake_play(backend, path, volume=70, duration=None):
-        calls.append({"path": path, "volume": volume, "duration": duration})
+    def fake_play(backend, path, volume=70, duration=None, start=None):
+        calls.append(
+            {"path": path, "volume": volume, "duration": duration, "start": start}
+        )
         return player.Playback(FakeProcess(), path)
 
     monkeypatch.setattr(player, "play", fake_play)

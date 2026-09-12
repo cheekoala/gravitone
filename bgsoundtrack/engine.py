@@ -28,6 +28,7 @@ class Event:
     kind: str  # "track" | "ambient" | "silence" | "done"
     path: Path | None = None
     duration: float | None = None
+    start: float | None = None  # where an ambient bed was started from
 
 
 class Controls:
@@ -84,11 +85,31 @@ class Engine:
         self.controls = controls or Controls()
         self._sleep = sleep
         self._monotonic = monotonic
+        # What is sounding right now, so the volume can be changed live.
+        self._playback: player.Playback | None = None
+        self._playing: str | None = None
 
     # -- gap planning ----------------------------------------------------
 
     def gap_length(self) -> float:
         return self.rng.uniform(self.config.gap_min, self.config.gap_max)
+
+    def ambient_start(self, path: Path, gap: float) -> float:
+        """Where to drop into an ambient track.
+
+        Anywhere that still leaves the whole gap covered - a two minute rain
+        loop over a thirty second gap can start anywhere in its first ninety
+        seconds. Without a known length (no ffprobe) we start at the top.
+        """
+        if not self.config.ambient_random_start:
+            return 0.0
+        duration = player.probe_duration(path)
+        if not duration:
+            return 0.0
+        room = duration - gap
+        if room <= 1.0:
+            return 0.0
+        return self.rng.uniform(0.0, room)
 
     def pick_ambient(self, ambient: list[Path], gap: float) -> Path | None:
         """Ambience for this gap, or None for plain silence."""
@@ -157,6 +178,7 @@ class Engine:
             track = queue.pop(0)
             emit(Event("track", path=track))
             playback = player.play(self.backend, track, volume=self.config.volume)
+            self._hold(playback, "track")
             self._wait_for_track(playback)
             if self.controls.stopping:
                 break
@@ -169,13 +191,39 @@ class Engine:
                 emit(Event("silence", duration=gap))
                 self._wait(gap)
             else:
-                emit(Event("ambient", path=bed, duration=gap))
+                start = self.ambient_start(bed, gap)
+                emit(Event("ambient", path=bed, duration=gap, start=start))
                 bed_playback = player.play(
-                    self.backend, bed, volume=self.config.ambient_volume, duration=gap
+                    self.backend,
+                    bed,
+                    volume=self.config.ambient_volume,
+                    duration=gap,
+                    start=start,
                 )
+                self._hold(bed_playback, "ambient")
                 self._wait(gap, bed_playback)
 
+        self._hold(None, None)
         emit(Event("done"))
+
+    def _hold(self, playback: player.Playback | None, kind: str | None) -> None:
+        self._playback, self._playing = playback, kind
+
+    def live_volume(self) -> bool:
+        """Push the configured level at whatever is sounding right now.
+
+        Players read their volume flag once at startup, so without this a
+        slider only takes effect on the next track.
+        """
+        playback = self._playback
+        if playback is None or self._playing is None:
+            return False
+        level = (
+            self.config.ambient_volume
+            if self._playing == "ambient"
+            else self.config.volume
+        )
+        return playback.set_volume(level)
 
     def _wait_for_track(self, playback: player.Playback) -> None:
         while playback.running:

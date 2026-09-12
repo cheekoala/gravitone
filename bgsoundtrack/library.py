@@ -348,7 +348,9 @@ def remove_track(
     for entry in entries(config, section, playlist):
         if entry.name != name:
             continue
-        if entry.origin == "link":
+        # Only ever delete a link. A real file that someone dropped into the
+        # library folder is theirs, so it gets remembered as removed instead.
+        if entry.path.is_symlink() or _is_hard_link(entry.path):
             unlink(config, [entry.path.name], section=section, playlist=playlist)
             return ("unlinked", entry.target)
         playlist.exclude(entry.target)

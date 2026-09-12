@@ -195,8 +195,12 @@ class Handler(BaseHTTPRequestHandler):
             session.toggle()
         elif route == "skip":
             session.skip()
+        elif route == "ban":
+            result = session.ban()
+            return {**session.snapshot(), "result": result}
         elif route == "config":
-            session.update_config(body)
+            live = session.update_config(body)
+            return {**session.snapshot(), "live": live}
         elif route == "link":
             path = body.get("path")
             if not path:
