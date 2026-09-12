@@ -18,5 +18,11 @@ classifiers = [
 [project.scripts]
 bgst = "bgsoundtrack.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/cheekoala/custom_bg_game_soundtrack_player"
+
 [tool.setuptools]
 packages = ["bgsoundtrack"]
+
+[tool.setuptools.package-data]
+bgsoundtrack = ["ui/*"]

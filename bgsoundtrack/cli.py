@@ -189,6 +189,18 @@ def _key_listener(controls: engine.Controls) -> None:
             pass
 
 
+def cmd_ui(args) -> int:
+    from bgsoundtrack import webui
+
+    return webui.run(
+        config_path=Path(args.config).expanduser() if args.config else None,
+        host=args.host,
+        port=args.port,
+        open_browser=not args.no_browser,
+        root=str(Path(args.root).expanduser()) if args.root else None,
+    )
+
+
 def cmd_play(args) -> int:
     config = _load_config(args)
     _apply_play_overrides(config, args)
@@ -274,6 +286,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("doctor", help="check the setup")
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("ui", help="open the little control panel in a browser")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="0.0.0.0 to reach it from your phone on the same network",
+    )
+    p.add_argument("--no-browser", action="store_true", help="do not open a browser")
+    p.set_defaults(func=cmd_ui)
 
     p = sub.add_parser("play", help="start playing")
     p.add_argument("--gap-min", dest="gap_min", type=float, help="shortest gap, seconds")

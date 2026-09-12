@@ -76,13 +76,23 @@ def _sources(paths: list[Path], recursive: bool) -> list[Path]:
     return found
 
 
-def existing_targets(directory: Path) -> set[Path]:
-    """Resolved targets of every link already in `directory`."""
+def _file_key(path: Path) -> tuple[int, int]:
+    """Identity of the file behind a path: (device, inode).
+
+    Identifies the same audio file through a symlink, a hard link, or a second
+    path to the same mount, so re-linking a folder never duplicates entries.
+    """
+    info = path.stat()  # follows links
+    return (info.st_dev, info.st_ino)
+
+
+def existing_targets(directory: Path) -> set[tuple[int, int]]:
+    """File identities of every entry already in `directory`."""
     targets = set()
     for entry in directory.iterdir() if directory.exists() else []:
         try:
-            targets.add(entry.resolve())
-        except OSError:
+            targets.add(_file_key(entry))
+        except OSError:  # dangling link
             continue
     return targets
 
@@ -111,7 +121,12 @@ def link(
         except OSError as exc:
             skipped.append((source, str(exc)))
             continue
-        if target in already:
+        try:
+            key = _file_key(target)
+        except OSError as exc:
+            skipped.append((source, str(exc)))
+            continue
+        if key in already:
             skipped.append((source, "already in library"))
             continue
 
@@ -121,14 +136,32 @@ def link(
             Path(os.path.relpath(target, destination.parent)) if relative else target
         )
         try:
-            destination.symlink_to(link_to)
+            _make_link(destination, link_to, target)
         except OSError as exc:
             skipped.append((source, f"could not link: {exc}"))
             continue
-        already.add(target)
+        already.add(key)
         linked.append(destination)
 
     return LinkResult(linked=linked, skipped=skipped)
+
+
+def _make_link(destination: Path, link_to: Path, target: Path) -> None:
+    """Symlink, falling back to a hard link where symlinks are privileged.
+
+    Windows only allows unprivileged symlinks with Developer Mode on. A hard
+    link needs no privilege and still costs no extra disk - it just cannot
+    cross volumes, which is why it is the fallback and not the default.
+    """
+    try:
+        destination.symlink_to(link_to)
+        return
+    except OSError as exc:
+        try:
+            os.link(target, destination)
+            return
+        except OSError:
+            raise exc
 
 
 def unlink(config: Config, names: list[str], section: str = "music") -> list[Path]:
@@ -137,15 +170,23 @@ def unlink(config: Config, names: list[str], section: str = "music") -> list[Pat
     removed = []
     for name in names:
         entry = directory / Path(name).name
-        if not entry.is_symlink():
+        if not entry.is_symlink() and not _is_hard_link(entry):
             if entry.exists():
                 raise LibraryError(
-                    f"{entry} is a real file, not a symlink - refusing to delete it"
+                    f"{entry} is a real file, not a link - refusing to delete it"
                 )
             raise LibraryError(f"not in the {section} library: {name}")
         entry.unlink()
         removed.append(entry)
     return removed
+
+
+def _is_hard_link(path: Path) -> bool:
+    """True if removing `path` leaves the audio behind under another name."""
+    try:
+        return path.is_file() and path.stat().st_nlink > 1
+    except OSError:
+        return False
 
 
 def tracks(config: Config, section: str = "music") -> list[Path]:

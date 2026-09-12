@@ -1,0 +1,299 @@
+// bgst UI - plain ES2019, no build step, no network beyond this server.
+(() => {
+  "use strict";
+
+  const TOKEN = location.hash.slice(1) || sessionStorage.getItem("bgst-token") || "";
+  if (TOKEN) sessionStorage.setItem("bgst-token", TOKEN);
+
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text != null) node.textContent = text;
+    return node;
+  };
+
+  let state = null;
+  let section = "music";      // which library the Add panel targets
+  let browsePath = null;
+  let toastTimer = null;
+
+  // -- server ---------------------------------------------------------
+  async function api(route, body) {
+    const res = await fetch(`/api/${route}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { "X-BGST-Token": TOKEN, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const payload = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    return payload;
+  }
+
+  function toast(message, bad) {
+    const node = $("toast");
+    node.textContent = message;
+    node.classList.toggle("bad", !!bad);
+    node.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { node.hidden = true; }, 3200);
+  }
+
+  async function call(route, body) {
+    try {
+      const next = await api(route, body);
+      if (next && next.config) render(next);
+      return next;
+    } catch (err) {
+      toast(err.message, true);
+      return null;
+    }
+  }
+
+  // -- formatting -----------------------------------------------------
+  // Paths matter at the tail (the filename), so trim from the left.
+  const shortPath = (path, max = 54) =>
+    path.length <= max ? path : `…${path.slice(path.length - max + 1)}`;
+
+  const clock = (seconds) => {
+    const total = Math.max(0, Math.round(seconds || 0));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  };
+  const humanGap = (config) =>
+    config.gap_min === config.gap_max
+      ? clock(config.gap_min)
+      : `${clock(config.gap_min)}–${clock(config.gap_max)}`;
+
+  // -- render ---------------------------------------------------------
+  function render(next) {
+    state = next;
+    const { config, now, running } = next;
+
+    $("root-path").textContent = shortPath(config.root, 44);
+    $("transport").dataset.on = String(running);
+    $("transport-label").textContent = running ? "Live" : "Play";
+    $("skip").disabled = !running;
+
+    // now playing
+    const panel = $("panel-now");
+    panel.classList.toggle("is-gap", !!now && now.kind !== "track");
+    const kinds = { track: "Now playing", ambient: "Ambience", silence: "Silence" };
+    $("now-kind").textContent = now ? kinds[now.kind] : (running ? "Starting" : "Idle");
+    $("now-title").textContent = now
+      ? (now.kind === "silence" ? "Quiet" : now.name)
+      : (next.error ? "Stopped" : "Nothing playing");
+    const pct = now && now.duration ? Math.min(100, (now.elapsed / now.duration) * 100) : 0;
+    $("now-progress").style.width = `${pct}%`;
+    $("now-elapsed").textContent = now ? clock(now.elapsed) : "0:00";
+    $("now-remaining").textContent =
+      now && now.duration ? `-${clock(now.duration - now.elapsed)}` : "";
+
+    $("stat-gap").textContent = humanGap(config);
+    $("stat-ambient").textContent = `${Math.round(config.ambient_chance * 100)}%`;
+
+    const history = $("history");
+    history.replaceChildren();
+    const seen = next.history.slice().reverse();
+    if (!seen.length) history.append(el("li", "empty", "Nothing yet"));
+    seen.forEach((name) => history.append(el("li", null, name)));
+
+    renderLibrary("music", next);
+    renderLibrary("ambient", next);
+    if (!document.activeElement || document.activeElement.type !== "range") syncSettings(config);
+
+    const players = next.players.length ? next.players.join(", ") : "none found";
+    $("backend-note").textContent = `Players available: ${players}. ` +
+      (next.players.length ? "" : "Install ffmpeg, mpv or vlc to hear anything.");
+    if (next.error) $("backend-note").textContent += ` — ${next.error}`;
+  }
+
+  function renderLibrary(name, next) {
+    const list = $(`${name}-list`);
+    const items = next.library[name];
+    const broken = next.broken[name];
+    $(`${name}-count`).textContent = String(items.length);
+    list.replaceChildren();
+
+    if (!items.length && !broken.length) {
+      list.append(el("li", "empty", name === "music"
+        ? "No music yet — open Add and link a folder."
+        : "No ambience yet — link rain, wind or room tone."));
+      return;
+    }
+
+    const playing = next.now && next.now.name;
+    items.forEach((entry) => {
+      const row = el("li", entry.name === playing && next.running ? "playing" : null);
+      const body = el("div", "t-body");
+      body.append(el("div", "t-name", entry.name), el("div", "t-target", shortPath(entry.target)));
+      const remove = el("button", "t-remove", "✕");
+      remove.title = `Unlink ${entry.name}`;
+      remove.addEventListener("click", () => call("unlink", { name: entry.name, section: name }));
+      row.append(body, remove);
+      list.append(row);
+    });
+    broken.forEach((brokenName) => {
+      const row = el("li", "broken");
+      const body = el("div", "t-body");
+      body.append(el("div", "t-name", brokenName), el("div", "t-target", "target missing"));
+      row.append(body);
+      list.append(row);
+    });
+  }
+
+  const SLIDERS = {
+    gap_min: (v) => `${v}s`,
+    gap_max: (v) => `${v}s`,
+    ambient_chance: (v) => `${v}%`,
+    volume: (v) => `${v}`,
+    ambient_volume: (v) => `${v}`,
+  };
+
+  function syncSettings(config) {
+    Object.keys(SLIDERS).forEach((key) => {
+      const value = key === "ambient_chance" ? Math.round(config[key] * 100) : Math.round(config[key]);
+      $(key).value = value;
+      $(`${key}-out`).textContent = SLIDERS[key](value);
+    });
+    $("shuffle").checked = config.shuffle;
+    $("loop").checked = config.loop;
+  }
+
+  // -- add panel ------------------------------------------------------
+  async function browse(path) {
+    let data;
+    try {
+      data = await api(`browse${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+    } catch (err) {
+      toast(err.message, true);
+      return;
+    }
+    browsePath = data.path;
+    $("crumb").textContent = data.path;
+    $("crumb").title = data.path;
+
+    const shortcuts = $("shortcuts");
+    shortcuts.replaceChildren();
+    data.shortcuts.forEach((shortcut) => {
+      const chip = el("button", "chip", shortcut.name);
+      chip.addEventListener("click", () => browse(shortcut.path));
+      shortcuts.append(chip);
+    });
+
+    const list = $("browser");
+    list.replaceChildren();
+
+    const linkHere = el("li");
+    linkHere.append(el("div", "t-body"));
+    linkHere.firstChild.append(
+      el("div", "t-name", `Link this folder to ${section}`),
+      el("div", "t-target", shortPath(data.path))
+    );
+    const addAll = el("button", "add", "Link all");
+    addAll.addEventListener("click", (event) => { event.stopPropagation(); link(data.path); });
+    linkHere.append(addAll);
+    linkHere.addEventListener("click", () => link(data.path));
+    list.append(linkHere);
+
+    if (data.parent) {
+      const up = el("li");
+      up.append(el("div", "t-body", "↑  Parent folder"));
+      up.addEventListener("click", () => browse(data.parent));
+      list.append(up);
+    }
+    data.dirs.forEach((dir) => {
+      const row = el("li");
+      const body = el("div", "t-body");
+      body.append(el("div", "t-name", `📁 ${dir.name}`));
+      row.append(body);
+      if (dir.audio) row.append(el("span", "badge", `${dir.audio} audio`));
+      row.addEventListener("click", () => browse(dir.path));
+      list.append(row);
+    });
+    data.files.forEach((file) => {
+      const row = el("li");
+      const body = el("div", "t-body");
+      body.append(el("div", "t-name", `♪ ${file.name}`));
+      const add = el("button", "add", "Link");
+      add.addEventListener("click", (event) => { event.stopPropagation(); link(file.path); });
+      row.append(body, add);
+      list.append(row);
+    });
+    if (!data.dirs.length && !data.files.length) list.append(el("li", "empty", "Nothing here"));
+  }
+
+  async function link(path) {
+    const next = await call("link", { path, section });
+    if (!next) return;
+    const { linked, skipped } = next.result;
+    toast(linked.length
+      ? `Linked ${linked.length} into ${section}${skipped.length ? `, ${skipped.length} skipped` : ""}`
+      : `Nothing linked${skipped.length ? ` — ${skipped[0][1]}` : ""}`);
+  }
+
+  // -- wiring ---------------------------------------------------------
+  function showPanel(name) {
+    document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === `panel-${name}`));
+    document.querySelectorAll(".rail-btn").forEach((b) => b.classList.toggle("active", b.dataset.panel === name));
+    if (name === "add") browse(browsePath);
+  }
+
+  document.querySelectorAll(".rail-btn").forEach((button) =>
+    button.addEventListener("click", () => showPanel(button.dataset.panel)));
+  document.querySelectorAll("[data-goto]").forEach((button) =>
+    button.addEventListener("click", () => {
+      section = button.dataset.goto === "add" && button.closest("#panel-ambient") ? "ambient" : section;
+      if (button.closest("#panel-ambient")) setSection("ambient");
+      if (button.closest("#panel-music")) setSection("music");
+      showPanel("add");
+    }));
+
+  function setSection(name) {
+    section = name;
+    document.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("active", b.dataset.section === name));
+  }
+  document.querySelectorAll(".seg-btn").forEach((button) =>
+    button.addEventListener("click", () => setSection(button.dataset.section)));
+
+  $("transport").addEventListener("click", () => call("toggle", {}));
+  $("skip").addEventListener("click", () => call("skip", {}));
+  $("prune").addEventListener("click", async () => {
+    const next = await call("prune", {});
+    if (next) toast(`${next.result.length} broken link(s) removed`);
+  });
+
+  Object.keys(SLIDERS).forEach((key) => {
+    const input = $(key);
+    input.addEventListener("input", () => {
+      $(`${key}-out`).textContent = SLIDERS[key](input.value);
+    });
+    input.addEventListener("change", () => {
+      const raw = Number(input.value);
+      const value = key === "ambient_chance" ? raw / 100 : raw;
+      // Keep the range coherent so the server never rejects the pair.
+      const patch = { [key]: value };
+      if (key === "gap_min" && state && raw > state.config.gap_max) patch.gap_max = raw;
+      if (key === "gap_max" && state && raw < state.config.gap_min) patch.gap_min = raw;
+      call("config", patch);
+    });
+  });
+  ["shuffle", "loop"].forEach((key) =>
+    $(key).addEventListener("change", () => call("config", { [key]: $(key).checked })));
+
+  document.addEventListener("keydown", (event) => {
+    if (event.target.matches("input, textarea")) return;
+    if (event.key === " ") { event.preventDefault(); call("toggle", {}); }
+    if (event.key === "n") call("skip", {});
+  });
+
+  // -- polling --------------------------------------------------------
+  async function poll() {
+    try {
+      render(await api("state"));
+    } catch (err) {
+      $("now-kind").textContent = "Disconnected";
+    }
+  }
+  poll();
+  setInterval(poll, 1000);
+})();

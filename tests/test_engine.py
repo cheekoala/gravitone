@@ -1,4 +1,5 @@
 import random
+import time
 from pathlib import Path
 
 import pytest
@@ -214,3 +215,39 @@ def test_detect_prefers_requested_backend(monkeypatch):
     monkeypatch.setattr(player.shutil, "which", lambda name: f"/usr/bin/{name}")
     assert player.detect("mpv").name == "mpv"
     assert player.detect("vlc").name == "cvlc"
+
+
+# -- session service ---------------------------------------------------
+
+
+def test_session_reports_what_is_playing(config, fake_player, monkeypatch):
+    from bgsoundtrack import service
+
+    monkeypatch.setattr(service.player, "detect", lambda: player.Backend("ffplay", "/bin/true"))
+    monkeypatch.setattr(service.player, "probe_duration", lambda path: 180.0)
+    session = service.Session(config)
+    session.start()
+    for _ in range(100):
+        if session.snapshot()["now"]:
+            break
+        time.sleep(0.02)
+    state = session.snapshot()
+    assert state["running"] is True
+    assert state["now"]["name"].endswith(".mp3")
+    assert state["backend"] == "ffplay"
+    session.stop()
+    assert session.snapshot()["running"] is False
+
+
+def test_session_start_without_a_player_raises(config, monkeypatch):
+    from bgsoundtrack import service
+
+    monkeypatch.setattr(service.player, "detect", _raise_no_player)
+    session = service.Session(config)
+    with pytest.raises(player.PlaybackError):
+        session.start()
+    assert session.snapshot()["error"]
+
+
+def _raise_no_player():
+    raise player.PlaybackError("no audio player found")
