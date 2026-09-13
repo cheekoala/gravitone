@@ -103,8 +103,8 @@ Or from the terminal:
 
 ```sh
 bgst init                                    # create the custom soundtrack folder
-bgst playlist new "Hollow Kingdom" --source ~/Music/Nier --use
-bgst playlist new "Field Work" --source ~/Sounds/recordings
+bgst playlist new "Hollow Kingdom" --folder ~/Music/Nier --use
+bgst playlist new "Field Work" --folder ~/Sounds/recordings
 bgst folder add --ambient ~/Sounds/weather   # into the selected playlist
 bgst link ~/Music/Outer\ Wilds               # or link track by track
 bgst play
@@ -162,8 +162,8 @@ trust.
 Already have two folders you think of as two playlists? Make them two:
 
 ```sh
-bgst playlist new "Hollow Kingdom" --source ~/Music/hollow-kingdom --use
-bgst playlist new "Night Drive"    --source ~/Music/night-drive
+bgst playlist new "Hollow Kingdom" --folder ~/Music/hollow-kingdom --use
+bgst playlist new "Night Drive"    --folder ~/Music/night-drive
 bgst playlist list
 bgst playlist use "Night Drive"
 ```

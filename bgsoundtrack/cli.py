@@ -500,7 +500,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_playlist)
     sp = playlist_actions.add_parser("new", help="create a playlist")
     sp.add_argument("name")
-    sp.add_argument("--source", help="a folder to play in place straight away")
+    sp.add_argument(
+        "--folder",
+        "--source",
+        dest="source",
+        help="a folder for it to play straight away",
+    )
     sp.add_argument("--use", action="store_true", help="select it as well")
     sp.set_defaults(func=cmd_playlist)
     sp = playlist_actions.add_parser("rename", help="rename a playlist")
