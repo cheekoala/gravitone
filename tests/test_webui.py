@@ -172,7 +172,9 @@ def test_pick_reports_when_no_chooser_is_available(server, monkeypatch):
     httpd, session, *_ = server
     monkeypatch.setattr(
         webui.Session, "pick",
-        lambda self, kind="folder", title="": picker.PickResult([], False, "no Tk here"),
+        lambda self, kind="folder", title="", suggested="": picker.PickResult(
+            [], False, "no Tk here"
+        ),
     )
     result = request(httpd, "/api/pick", {"kind": "folder"})
     assert result == {"paths": [], "available": False, "reason": "no Tk here"}

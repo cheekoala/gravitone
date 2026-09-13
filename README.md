@@ -128,7 +128,7 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 
 | | |
 | --- | --- |
-| ![The music library, mixing linked tracks with one from a folder](docs/ui-library.png) | ![Settings, with playlists and folders](docs/ui-settings.png) |
+| ![The music library, sorted by album](docs/ui-library.png) | ![Settings: folders, export and import](docs/ui-settings.png) |
 | ![Adding: a whole folder, or just the files in it](docs/ui-add.png) | |
 
 - **Top bar** — the playlist selector; switching it switches what plays.
@@ -142,7 +142,7 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
   **Link files** (just the files in it now, as symlinks), plus *New playlist
   from this folder…*.
 - **Config** — gaps, levels, shuffle, loop, your playlists (rename, delete,
-  create) and this playlist's folders and removed tracks. Changes save
+  create), this playlist's folders and removed tracks, and export/import. Changes save
   immediately and take effect from the next gap; no need to restart playback.
 
 Keys: `space` play/stop, `n` next, `b` ban. Every API call needs the token in the URL,
@@ -191,6 +191,51 @@ as it did, folders and all.
 Playlists live in `~/.config/bgsoundtrack/playlists.json` — plain JSON, easy
 to read, back up, or edit by hand.
 
+## Sorting
+
+Each library panel has a sort picker: **file name**, **title**, **artist** or
+**album**. It is also the play order when shuffle is off, and it is a setting,
+so it sticks.
+
+```sh
+bgst list --sort album        # or artist, title, name
+bgst config sort_by=artist    # the default from now on
+```
+
+Tags come from `ffprobe` (part of ffmpeg). Anything it cannot read falls back
+to what the path says — `Artist/Album/03 Title.flac` is a convention for a
+reason — and album sorting puts track numbers in order within a record. Tags
+are read in the background and cached in `~/.config/bgsoundtrack/tags.json`,
+so a listing never waits on a probe; while it is still working the panel says
+how many are left.
+
+## Export and import
+
+Two shapes, for two jobs:
+
+```sh
+bgst export ~/bgst-library.json                    # a manifest: what is in each playlist
+bgst export ~/library.csv --format csv             # the same, flat, one row per track
+bgst export ~/share.zip --bundle --only "Night Drive"   # a zip with the audio inside
+bgst import ~/share.zip                            # adds playlists, never overwrites
+```
+
+A **manifest** is small, readable JSON listing each playlist's folders, links
+and removals. It points at files rather than carrying them — right for your
+own backup, or moving to a machine that has the same music on it. Import
+reports anything that isn't there.
+
+A **bundle** is a zip with the audio in it, so someone else can unpack it and
+hear what you hear. Importing one unpacks to
+`custom soundtrack/imported/<name>/` and makes playlists that play it.
+(Paths inside a bundle are checked before extraction — a zip cannot write
+outside that folder.)
+
+Either can be driven from Config → *Export & import*, which uses your
+desktop's save/open dialog where there is one and a path box where there
+isn't. Import always **adds**: a name that already exists becomes
+`Hollow Kingdom (2)` rather than replacing anything.
+
 ## The library
 
 ```
@@ -228,6 +273,9 @@ one to drop a track. The player ignores non-audio files and dangling links.
 | `bgst folder add\|remove\|list` | put whole folders in this playlist (`--ambient`) |
 | `bgst playlist list\|new\|use\|rename\|remove` | switch between sets of music |
 | `bgst playlist removed\|restore` | see and undo removals in this playlist |
+| `bgst export PATH [--bundle\|--format csv]` | write playlists out, with or without the audio |
+| `bgst import PATH` | read one back in as new playlists |
+| `bgst list --sort album` | order by name, title, artist or album |
 | `bgst play --hidden` | play without ever showing gap lengths |
 | `bgst ui --stop\|--new` | stop the running control panel, or start a second |
 | `bgst unlink NAME...` | remove entries (only ever deletes symlinks, never real files) |
@@ -278,6 +326,7 @@ smear of rain sounds like a mistake.
 | `ambient_min_tail` | `3.0` | shortest gap worth filling with ambience |
 | `ambient_random_start` | `true` | drop into an ambient track at a random point |
 | `hide_gaps` | `false` | hidden mode: never show how long a gap runs |
+| `sort_by` | `name` | list and play order: name, title, artist or album |
 | `volume` / `ambient_volume` | `70` / `45` | ambience sits under the music |
 | `shuffle` | `true` | shuffled passes; no repeat until all have played |
 | `loop` | `true` | start a new pass when the list is exhausted |

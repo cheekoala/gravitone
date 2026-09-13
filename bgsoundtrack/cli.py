@@ -17,6 +17,7 @@ from bgsoundtrack import (
     library,
     player,
     playlists,
+    transfer,
 )
 from bgsoundtrack.config import Config
 
@@ -94,6 +95,61 @@ def cmd_unlink(args) -> int:
         how, target = library.remove_track(config, name, section=section, playlist=playlist)
         store.save()
         print(f"{how} {name}" + ("" if how == "unlinked" else f" (remembered for {playlist.name})"))
+    return 0
+
+
+def cmd_export(args) -> int:
+    """Write the library out: a manifest, or a bundle with the audio in it."""
+    config, store, playlist = _load(args)
+    names = args.only or None
+    path = Path(args.path).expanduser()
+
+    if args.bundle:
+        report = transfer.export_bundle(
+            config, store, path, names,
+            on_progress=(lambda done, name: print(f"  packed {done}: {name}"))
+            if args.verbose
+            else None,
+        )
+        size = report.path.stat().st_size / 1e6
+        print(f"wrote {report.path} ({size:.1f} MB, {report.tracks} tracks)")
+    else:
+        report = transfer.export(config, store, path, names, fmt=args.format)
+        print(
+            f"wrote {report.path} ({report.total} track(s): "
+            f"{report.tracks} linked, {report.folders} folder(s))"
+        )
+    print(f"playlists: {', '.join(report.playlists)}")
+    for name, reason in report.skipped:
+        print(f"  skipped {name}: {reason}", file=sys.stderr)
+    return 0
+
+
+def cmd_import(args) -> int:
+    """Read one back in. Never overwrites - it adds playlists."""
+    config, store, playlist = _load(args)
+    path = Path(args.path).expanduser()
+    if not path.exists():
+        print(f"error: no such file: {path}", file=sys.stderr)
+        return 2
+
+    if transfer.looks_like_bundle(path):
+        report = transfer.import_bundle(
+            config, store, path, args.name, Path(args.into).expanduser() if args.into else None
+        )
+        print(f"unpacked {report.tracks} track(s) into {report.path}")
+    else:
+        report = transfer.import_manifest(config, store, path, args.name)
+        print(f"linked {report.tracks} track(s), {report.folders} folder(s)")
+    print(f"added playlist(s): {', '.join(report.playlists)}")
+    for name, reason in report.skipped:
+        print(f"  skipped {name}: {reason}", file=sys.stderr)
+    if report.skipped:
+        print(
+            f"{len(report.skipped)} item(s) were not found on this machine - "
+            "a bundle export carries the audio with it",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -208,11 +264,20 @@ def cmd_list(args) -> int:
     config, store, playlist = _load(args)
     sections = ("ambient",) if args.ambient else ("music",) if args.music else library.SECTIONS
     print(f"playlist: {playlist.name}\n")
+    sort = getattr(args, "sort", None) or config.sort_by
+    if sort != "name":
+        from bgsoundtrack import tags
+
+        reader = tags.Reader()
+        for section in sections:
+            reader.read_all(
+                [entry.target for entry in library.entries(config, section, playlist)]
+            )
     for section in sections:
-        entries = library.entries(config, section, playlist)
+        entries = library.entries(config, section, playlist, sort=sort)
         print(f"{section} ({len(entries)}):")
         for entry in entries:
-            tag = "" if entry.origin == "link" else "  (source)"
+            tag = "" if entry.origin == "link" else "  (folder)"
             if args.targets:
                 print(f"  {entry.name} -> {entry.target}{tag}")
             else:
@@ -543,7 +608,35 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--music", action="store_true")
     p.add_argument("--ambient", action="store_true")
     p.add_argument("--targets", action="store_true", help="show what each link points at")
+    p.add_argument(
+        "--sort",
+        choices=list(library.SORTS),
+        help="order by file name, title, artist or album (default: your setting)",
+    )
     p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("export", help="write playlists out to a file")
+    p.add_argument("path", metavar="PATH")
+    p.add_argument(
+        "--only",
+        action="append",
+        metavar="PLAYLIST",
+        help="export just this playlist (repeat for more; default: all)",
+    )
+    p.add_argument(
+        "--bundle",
+        action="store_true",
+        help="a zip with the audio files inside, to share",
+    )
+    p.add_argument("--format", choices=["json", "csv"], default="json")
+    p.add_argument("--verbose", action="store_true", help="name each packed file")
+    p.set_defaults(func=cmd_export)
+
+    p = sub.add_parser("import", help="read an export back in, as new playlists")
+    p.add_argument("path", metavar="PATH")
+    p.add_argument("--name", help="name for the imported playlist (single ones only)")
+    p.add_argument("--into", help="where to unpack a bundle's audio")
+    p.set_defaults(func=cmd_import)
 
     p = sub.add_parser("prune", help="drop symlinks whose target is gone")
     p.set_defaults(func=cmd_prune)

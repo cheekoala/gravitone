@@ -14,6 +14,9 @@ from pathlib import Path
 # The longest gap the UI offers: an hour of quiet between two songs.
 MAX_GAP = 3600.0
 
+# How a library can be ordered.
+SORTS = ("name", "title", "artist", "album")
+
 MUSIC_DIRNAME = "music"
 AMBIENT_DIRNAME = "ambient"
 
@@ -79,6 +82,9 @@ class Config:
     # Hidden mode: never say how long a gap is or how much of it is left.
     # The wait is the point; a countdown ruins it.
     hide_gaps: bool = False
+    # How the library is listed, and the order it plays in with shuffle off:
+    # name, title, artist or album.
+    sort_by: str = "name"
 
     # Folders played in place. An alternative to linking: nothing is added to
     # the library folder, the tree is simply scanned every time it is needed,
@@ -129,6 +135,8 @@ class Config:
         for name in ("music_sources", "ambient_sources"):
             if not isinstance(getattr(self, name), list):
                 raise ValueError(f"{name} must be a list of folders")
+        if self.sort_by not in SORTS:
+            raise ValueError(f"sort_by must be one of {', '.join(SORTS)}")
 
     def to_dict(self) -> dict:
         return asdict(self)

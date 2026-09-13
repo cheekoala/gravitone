@@ -147,15 +147,15 @@ def _store():
     return playlists.load(config_module.load())
 
 
-def test_cli_list_marks_source_tracks(env, tmp_path, capsys):
+def test_cli_list_marks_folder_tracks(env, tmp_path, capsys):
     album = tmp_path / "album"
     album.mkdir()
     (album / "a.mp3").write_bytes(b"\0")
     main(["init"])
-    main(["source", "add", str(album)])
+    main(["folder", "add", str(album)])
     capsys.readouterr()
     assert main(["list", "--music"]) == 0
-    assert "a.mp3  (source)" in capsys.readouterr().out
+    assert "a.mp3  (folder)" in capsys.readouterr().out
 
 
 def test_picker_reports_unavailable_without_tk(monkeypatch):

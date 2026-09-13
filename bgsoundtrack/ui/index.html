@@ -108,17 +108,31 @@
       <section class="panel" id="panel-music">
         <div class="panel-head">
           <h2>Music <span class="count" id="music-count">0</span></h2>
-          <button class="ghost small" data-goto="add">Add music</button>
+          <div class="head-tools">
+            <label class="sort-pick">
+              <select class="sort" data-sort-for="music"></select>
+              <svg viewBox="0 0 24 24" class="icon chev"><path d="M6 9l6 6 6-6"/></svg>
+            </label>
+            <button class="ghost small" data-goto="add">Add music</button>
+          </div>
         </div>
+        <p class="hint" id="music-tags" hidden></p>
         <ul class="tracks" id="music-list"></ul>
       </section>
 
       <section class="panel" id="panel-ambient">
         <div class="panel-head">
           <h2>Ambient <span class="count" id="ambient-count">0</span></h2>
-          <button class="ghost small" data-goto="add">Add ambience</button>
+          <div class="head-tools">
+            <label class="sort-pick">
+              <select class="sort" data-sort-for="ambient"></select>
+              <svg viewBox="0 0 24 24" class="icon chev"><path d="M6 9l6 6 6-6"/></svg>
+            </label>
+            <button class="ghost small" data-goto="add">Add ambience</button>
+          </div>
         </div>
         <p class="hint">Wind, rain, crickets, a tavern. Played under the gaps between songs.</p>
+        <p class="hint" id="ambient-tags" hidden></p>
         <ul class="tracks" id="ambient-list"></ul>
       </section>
 
@@ -182,7 +196,7 @@
         </div>
         <div class="card">
           <div class="kicker">Playlists</div>
-          <p class="hint">Each playlist has its own links, source folders and removals. Switching one in changes what plays from the next track.</p>
+          <p class="hint">Each playlist has its own links, folders and removals. Switching one in changes what plays from the next track.</p>
           <ul class="sources" id="playlists-list"></ul>
           <form class="path-form" id="new-playlist-form">
             <input type="text" id="new-playlist-name" placeholder="New playlist name" autocomplete="off">
@@ -201,6 +215,25 @@
           <div class="row-actions">
             <button class="ghost small" data-goto="add">Add a folder</button>
           </div>
+        </div>
+        <div class="card">
+          <div class="kicker">Export &amp; import</div>
+          <p class="hint">
+            A <strong>manifest</strong> is a small file listing what is in each playlist —
+            for your own backup, or a machine with the same music on it. A
+            <strong>bundle</strong> is a zip with the audio inside, to hand to someone else.
+          </p>
+          <div class="add-tools">
+            <button class="ghost small" data-export="json">Export manifest</button>
+            <button class="ghost small" data-export="csv">Export CSV</button>
+            <button class="ghost small" data-export="bundle">Export bundle…</button>
+            <button class="ghost small" id="import-file">Import…</button>
+          </div>
+          <form class="path-form" id="transfer-form" hidden>
+            <input type="text" id="transfer-path" placeholder="path" spellcheck="false" autocomplete="off">
+            <button class="ghost small" type="submit" id="transfer-go">Go</button>
+          </form>
+          <p class="hint" id="transfer-note" hidden></p>
         </div>
         <div class="card">
           <div class="kicker">Playback</div>

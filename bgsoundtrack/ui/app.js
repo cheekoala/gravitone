@@ -174,6 +174,7 @@
     if (!seen.length) history.append(el("li", "empty", "Nothing yet"));
     seen.forEach((name) => history.append(el("li", null, name)));
 
+    renderSortPickers(next);
     renderPlaylistPicker(next);
     renderPlaylists(next);
     renderRemoved(next);
@@ -211,6 +212,37 @@
     if (document.activeElement !== picker) picker.value = next.playlist;
   }
 
+  const SORT_LABELS = {
+    name: "File name",
+    title: "Title",
+    artist: "Artist",
+    album: "Album",
+  };
+
+  function renderSortPickers(next) {
+    document.querySelectorAll("select.sort").forEach((picker) => {
+      if (!picker.options.length) {
+        next.sorts.forEach((value) => {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = SORT_LABELS[value] || value;
+          picker.append(option);
+        });
+      }
+      if (document.activeElement !== picker) picker.value = next.sort;
+    });
+    ["music", "ambient"].forEach((name) => {
+      const note = $(`${name}-tags`);
+      // Tags are read in the background; say so rather than sorting silently
+      // by a guess taken from the path.
+      note.hidden = !next.tags_pending || next.sort === "name";
+      if (!note.hidden) {
+        note.textContent = `Reading tags — ${next.tags_pending} to go. `
+          + `Until then these are ordered by what the folder names say.`;
+      }
+    });
+  }
+
   function renderPlaylists(next) {
     const list = $("playlists-list");
     if (list.querySelector("input.rename")) return;   // mid-rename, leave it alone
@@ -221,7 +253,7 @@
       name.title = item.active ? "Playing from this one" : "Switch to this playlist";
       name.addEventListener("click", () => selectPlaylist(item.id));
       const meta = el("span", "s-meta",
-        `${item.sources} source${item.sources === 1 ? "" : "s"}` +
+        `${item.sources} folder${item.sources === 1 ? "" : "s"}` +
         (item.removed ? `, ${item.removed} removed` : ""));
 
       const rename = el("button", "s-edit", "✎");
@@ -309,7 +341,11 @@
     data.tracks.forEach((track) => {
       const row = el("li", track.name === playing && state.running ? "playing" : null);
       const body = el("div", "t-body");
-      body.append(el("div", "t-name", track.name), el("div", "t-target", shortPath(track.target)));
+      const meta = [track.artist, track.album].filter(Boolean).join(" — ");
+      body.append(
+        el("div", "t-name", track.title && state.sort !== "name" ? track.title : track.name),
+        el("div", "t-target", meta && state.sort !== "name" ? meta : shortPath(track.target))
+      );
       row.append(body);
       if (track.origin === "source") {
         const tag = el("span", "tag source", "folder");
@@ -574,6 +610,97 @@
     return done.result;
   }
 
+  // -- export & import --------------------------------------------------
+  const EXPORT_NAMES = { json: "bgst-library.json", csv: "bgst-library.csv", bundle: "bgst-bundle.zip" };
+
+  function transferNote(text, bad) {
+    const note = $("transfer-note");
+    note.hidden = !text;
+    note.textContent = text || "";
+    note.style.color = bad ? "#ff9ea1" : "";
+  }
+
+  async function askForPath(kind, title, suggested) {
+    // The desktop dialog when there is one; otherwise the little path box.
+    if (state && state.picker) {
+      transferNote("Waiting for the file dialog on the machine running bgst…");
+      const picked = await api("pick", { kind, title, suggested }).catch(() => null);
+      transferNote("");
+      if (picked && picked.available) return picked.paths[0] || null;
+    }
+    return undefined;   // caller falls back to the inline form
+  }
+
+  let pendingTransfer = null;
+
+  function askInline(label, placeholder, done) {
+    pendingTransfer = done;
+    const form = $("transfer-form");
+    form.hidden = false;
+    $("transfer-go").textContent = label;
+    $("transfer-path").placeholder = placeholder;
+    $("transfer-path").focus();
+  }
+
+  const kindOf = (path) => (/\.zip$/i.test(path || "") ? "bundle" : "manifest");
+
+  async function doExport(kind, path) {
+    transferNote(kind === "bundle" ? "Packing the audio…" : "Working…");
+    const next = await call("export", { path, kind });
+    if (!next) { transferNote("", true); return; }
+    const { tracks, total, bytes, skipped, path: written } = next.result;
+    const size = bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
+    const counted = kindOf(written) === "bundle"
+      ? `${tracks} track(s) packed`
+      : `${total} track(s) listed`;
+    transferNote(`Wrote ${written} — ${counted}, ${size}`
+      + (skipped.length ? `, ${skipped.length} skipped` : ""));
+    toast(`Exported to ${written}`);
+  }
+
+  async function doImport(path) {
+    transferNote("Working…");
+    const next = await call("import", { path });
+    if (!next) { transferNote("", true); return; }
+    invalidate();
+    const { playlists: added, tracks, skipped } = next.result;
+    transferNote(`Added ${added.join(", ")} — ${tracks} track(s)`
+      + (skipped.length ? `, ${skipped.length} not found here` : ""));
+    toast(`Imported ${added.join(", ")}`);
+  }
+
+  document.querySelectorAll("[data-export]").forEach((button) =>
+    button.addEventListener("click", async () => {
+      const kind = button.dataset.export;
+      const suggested = EXPORT_NAMES[kind];
+      const picked = await askForPath("save", `Export ${kind === "bundle" ? "bundle" : "manifest"}`, suggested);
+      if (picked === undefined) {
+        askInline("Export", `where to write ${suggested}`, (path) => doExport(kind, path));
+        return;
+      }
+      if (picked) doExport(kind, picked);
+    }));
+
+  $("import-file").addEventListener("click", async () => {
+    const picked = await askForPath("files", "Choose a bgst export to import", "");
+    if (picked === undefined) {
+      askInline("Import", "path to a .json or .zip export", doImport);
+      return;
+    }
+    if (picked) doImport(picked);
+  });
+
+  $("transfer-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = $("transfer-path").value.trim();
+    if (!value || !pendingTransfer) return;
+    $("transfer-form").hidden = true;
+    $("transfer-path").value = "";
+    const run = pendingTransfer;
+    pendingTransfer = null;
+    run(value);
+  });
+
   // -- wiring ---------------------------------------------------------
   function showPanel(name) {
     panel = name;
@@ -614,6 +741,11 @@
     if (value) browse(value);
   });
   $("playlist-select").addEventListener("change", (event) => selectPlaylist(event.target.value));
+  document.querySelectorAll("select.sort").forEach((picker) =>
+    picker.addEventListener("change", async () => {
+      const done = await call("config", { sort_by: picker.value });
+      if (done) { libraries.music = null; libraries.ambient = null; loadLibrary(panel); }
+    }));
   $("new-playlist-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const value = $("new-playlist-name").value.trim();

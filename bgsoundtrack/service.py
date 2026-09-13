@@ -19,6 +19,8 @@ from bgsoundtrack import (
     picker,
     player,
     playlists,
+    tags,
+    transfer,
 )
 from bgsoundtrack.config import Config
 
@@ -56,6 +58,8 @@ class Session:
         self._backend: player.Backend | None = None
         self._picker_available: bool | None = None
         self._runner: engine.Engine | None = None
+        self._tags = tags.Reader(tags.cache_path(config_path))
+        self._tags_pending = 0
 
     # -- state -----------------------------------------------------------
 
@@ -73,6 +77,9 @@ class Session:
             "backend": self._backend.name if self._backend else None,
             "players": player.available(),
             "picker": self.picker_available,
+            "sort": self.config.sort_by,
+            "sorts": list(library.SORTS),
+            "tags_pending": self._tags_pending,
             "history": list(self._history[-12:]),
             "now": None if now is None else self._describe(now),
             "hidden": self.config.hide_gaps,
@@ -129,7 +136,11 @@ class Session:
 
     def library(self, section: str) -> dict:
         """The full track list of one section - fetched on demand."""
-        found = library.entries(self.config, section, self.playlist)
+        found = library.entries(
+            self.config, section, self.playlist, reader=self._tags
+        )
+        if self.config.sort_by != "name":
+            self._warm_tags([entry.target for entry in found])
         return {
             "section": section,
             "tracks": [
@@ -138,6 +149,7 @@ class Session:
                     "target": str(entry.target),
                     "origin": entry.origin,
                     "source": str(entry.source) if entry.source else None,
+                    **self._tag_fields(entry.target),
                 }
                 for entry in found
             ],
@@ -158,6 +170,35 @@ class Session:
                 }
             )
         return listed
+
+    def _tag_fields(self, target: Path) -> dict:
+        """Whatever we can say about a track without stopping to probe it."""
+        if self.config.sort_by == "name":
+            return {}
+        known = self._tags.known(target)
+        return {
+            "title": known.title,
+            "artist": known.artist,
+            "album": known.album,
+            "guessed": known.guessed,
+        }
+
+    def _warm_tags(self, targets: list) -> None:
+        """Read the real tags in the background; listings never wait on it."""
+        waiting = self._tags.pending(targets)
+        self._tags_pending = len(waiting)
+        if not waiting or getattr(self, "_tag_thread", None) and self._tag_thread.is_alive():
+            return
+
+        def work() -> None:
+            def progress(done, total):
+                self._tags_pending = max(0, total - done)
+
+            self._tags.read_all(waiting, progress)
+            self._tags_pending = 0
+
+        self._tag_thread = threading.Thread(target=work, daemon=True, name="bgst-tags")
+        self._tag_thread.start()
 
     @property
     def picker_available(self) -> bool:
@@ -371,5 +412,43 @@ class Session:
         self.store.touch()
         return playlist.id
 
-    def pick(self, kind: str = "folder", title: str = "Choose a folder") -> picker.PickResult:
-        return picker.pick(kind, title)
+    def pick(
+        self, kind: str = "folder", title: str = "Choose a folder", suggested: str = ""
+    ) -> picker.PickResult:
+        return picker.pick(kind, title, suggested=suggested)
+
+    # -- export & import -------------------------------------------------
+
+    def export(self, path: str, kind: str = "json", only: list | None = None) -> dict:
+        """Write the library out. `kind` is json, csv or bundle."""
+        target = Path(path).expanduser()
+        if kind == "bundle":
+            report = transfer.export_bundle(self.config, self.store, target, only)
+        else:
+            report = transfer.export(self.config, self.store, target, only, fmt=kind)
+        return {
+            "path": str(report.path),
+            "tracks": report.tracks,
+            "total": report.total,
+            "folders": report.folders,
+            "playlists": report.playlists,
+            "skipped": report.skipped,
+            "bytes": report.path.stat().st_size if report.path.exists() else 0,
+        }
+
+    def import_file(self, path: str, name: str | None = None) -> dict:
+        source = Path(path).expanduser()
+        if not source.exists():
+            raise library.LibraryError(f"no such file: {source}")
+        if transfer.looks_like_bundle(source):
+            report = transfer.import_bundle(self.config, self.store, source, name)
+        else:
+            report = transfer.import_manifest(self.config, self.store, source, name)
+        self.store.touch()
+        return {
+            "playlists": report.playlists,
+            "tracks": report.tracks,
+            "folders": report.folders,
+            "skipped": report.skipped,
+            "path": str(report.path) if report.path else None,
+        }
