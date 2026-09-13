@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>bgst</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>♪</text></svg>">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span class="brand-name">bgst</span>
+      <label class="playlist-pick">
+        <select id="playlist-select" title="Playlist"></select>
+        <svg viewBox="0 0 24 24" class="icon chev"><path d="M6 9l6 6 6-6"/></svg>
+      </label>
+      <span class="brand-sub" id="root-path"></span>
+    </div>
+    <div class="topbar-actions">
+      <div class="skip-group" id="skip-group">
+        <button class="ghost" id="skip" title="Next track (N)" disabled>
+          <svg viewBox="0 0 24 24" class="icon"><path d="M6 5l9 7-9 7V5z"/><rect x="16" y="5" width="2.4" height="14" rx="1"/></svg>
+        </button>
+        <button class="ghost ban" id="ban" title="Ban: skip and remove from this playlist (B)" disabled>
+          <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="8.4"/><path d="M6.2 6.2l11.6 11.6"/></svg>
+          <span>Ban</span>
+        </button>
+      </div>
+      <button class="live" id="transport" data-on="false">
+        <span class="live-dot"></span><span id="transport-label">Play</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="offline" id="offline" hidden>
+    <strong>This page needs the bgst server.</strong>
+    <span id="offline-detail">Start it with <code>bgst ui</code> — it opens the working page for you.
+    Opening <code>index.html</code> straight from the folder cannot reach your files.</span>
+  </div>
+
+  <div class="body">
+    <nav class="rail" role="tablist" aria-label="Sections">
+      <button class="rail-btn active" data-panel="now" title="Now playing" role="tab">
+        <svg viewBox="0 0 24 24" class="icon"><path d="M9 18V6l10-2v12"/><circle cx="7" cy="18" r="2.6"/><circle cx="17" cy="16" r="2.6"/></svg>
+        <span>Now</span>
+      </button>
+      <button class="rail-btn" data-panel="music" title="Music library" role="tab">
+        <svg viewBox="0 0 24 24" class="icon"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+        <span>Music</span>
+      </button>
+      <button class="rail-btn" data-panel="ambient" title="Ambient library" role="tab">
+        <svg viewBox="0 0 24 24" class="icon"><path d="M3 9h10a3 3 0 1 0-3-3M3 14h14a3 3 0 1 1-3 3M3 19h7"/></svg>
+        <span>Ambient</span>
+      </button>
+      <button class="rail-btn" data-panel="add" title="Add files" role="tab">
+        <svg viewBox="0 0 24 24" class="icon"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6M9 14h6"/></svg>
+        <span>Add</span>
+      </button>
+      <button class="rail-btn" data-panel="settings" title="Settings" role="tab">
+        <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M21.2 12h-3M5.8 12h-3M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1M18.5 18.5l-2.1-2.1M7.6 7.6L5.5 5.5"/></svg>
+        <span>Config</span>
+      </button>
+    </nav>
+
+    <main class="stage">
+      <!-- NOW -->
+      <section class="panel active" id="panel-now">
+        <div class="card now">
+          <div class="kicker" id="now-kind">Idle</div>
+          <div class="now-title" id="now-title">Nothing playing</div>
+          <div class="progress"><div class="progress-fill" id="now-progress"></div></div>
+          <div class="now-meta">
+            <span id="now-elapsed">0:00</span>
+            <span id="now-remaining"></span>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card stat">
+            <div class="kicker">Gap range</div>
+            <div class="stat-value" id="stat-gap">—</div>
+            <div class="stat-note">between songs</div>
+          </div>
+          <div class="card stat">
+            <div class="kicker">Ambience</div>
+            <div class="stat-value" id="stat-ambient">—</div>
+            <div class="stat-note">of gaps, rest is silence</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="kicker">Recently played</div>
+          <ul class="history" id="history"><li class="empty">Nothing yet</li></ul>
+        </div>
+      </section>
+
+      <!-- LIBRARIES -->
+      <section class="panel" id="panel-music">
+        <div class="panel-head">
+          <h2>Music <span class="count" id="music-count">0</span></h2>
+          <button class="ghost small" data-goto="add">Add music</button>
+        </div>
+        <ul class="tracks" id="music-list"></ul>
+      </section>
+
+      <section class="panel" id="panel-ambient">
+        <div class="panel-head">
+          <h2>Ambient <span class="count" id="ambient-count">0</span></h2>
+          <button class="ghost small" data-goto="add">Add ambience</button>
+        </div>
+        <p class="hint">Wind, rain, crickets, a tavern. Played under the gaps between songs.</p>
+        <ul class="tracks" id="ambient-list"></ul>
+      </section>
+
+      <!-- ADD -->
+      <section class="panel" id="panel-add">
+        <div class="panel-head">
+          <h2>Add to library</h2>
+          <div class="seg" id="section-toggle">
+            <button class="seg-btn active" data-section="music">Music</button>
+            <button class="seg-btn" data-section="ambient">Ambient</button>
+          </div>
+        </div>
+        <p class="hint">
+          <strong>Link</strong> copies nothing — it drops a symlink in your library, track by track.
+          <strong>Source</strong> plays a whole folder where it stands and picks up anything you add to it later.
+        </p>
+        <div class="add-tools">
+          <button class="ghost small" id="pick-folder">
+            <svg viewBox="0 0 24 24" class="icon"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            Choose a folder…
+          </button>
+          <form class="path-form" id="path-form">
+            <input type="text" id="path-input" placeholder="…or paste a path" spellcheck="false" autocomplete="off">
+            <button class="ghost small" type="submit">Go</button>
+          </form>
+          <button class="ghost small" id="new-from-folder">New playlist from this folder</button>
+        </div>
+        <form class="path-form" id="folder-playlist-form" hidden>
+          <input type="text" id="folder-playlist-name" placeholder="Playlist name" autocomplete="off">
+          <button class="ghost small" type="submit">Create &amp; select</button>
+        </form>
+        <div class="shortcuts" id="shortcuts"></div>
+        <div class="crumb" id="crumb"></div>
+        <ul class="browser" id="browser"></ul>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="panel" id="panel-settings">
+        <div class="panel-head"><h2>Settings</h2></div>
+        <div class="card">
+          <div class="kicker">Gaps</div>
+          <label class="field"><span>Shortest gap</span>
+            <input type="range" id="gap_min" min="0" max="1000" step="1">
+            <input class="value" type="text" id="gap_min-out" inputmode="numeric" spellcheck="false"></label>
+          <label class="field"><span>Longest gap</span>
+            <input type="range" id="gap_max" min="0" max="1000" step="1">
+            <input class="value" type="text" id="gap_max-out" inputmode="numeric" spellcheck="false"></label>
+          <label class="field"><span>Ambience chance</span>
+            <input type="range" id="ambient_chance" min="0" max="100" step="5"><output id="ambient_chance-out"></output></label>
+          <label class="switch"><input type="checkbox" id="hide_gaps"><span class="track"></span>Hidden mode — never show how long a gap lasts</label>
+          <label class="switch"><input type="checkbox" id="ambient_random_start"><span class="track"></span>Start ambient tracks at a random point</label>
+        </div>
+        <div class="card">
+          <div class="kicker">Levels</div>
+          <label class="field"><span>Music volume</span>
+            <input type="range" id="volume" min="0" max="100" step="1"><output id="volume-out"></output></label>
+          <label class="field"><span>Ambience volume</span>
+            <input type="range" id="ambient_volume" min="0" max="100" step="1"><output id="ambient_volume-out"></output></label>
+        </div>
+        <div class="card">
+          <div class="kicker">Playlists</div>
+          <p class="hint">Each playlist has its own links, source folders and removals. Switching one in changes what plays from the next track.</p>
+          <ul class="sources" id="playlists-list"></ul>
+          <form class="path-form" id="new-playlist-form">
+            <input type="text" id="new-playlist-name" placeholder="New playlist name" autocomplete="off">
+            <button class="ghost small" type="submit">Create</button>
+          </form>
+        </div>
+        <div class="card" id="removed-card" hidden>
+          <div class="kicker">Removed from this playlist</div>
+          <p class="hint">Files in a source folder are never deleted — they are just kept out of this playlist.</p>
+          <ul class="sources" id="removed-list"></ul>
+        </div>
+        <div class="card">
+          <div class="kicker">Source folders</div>
+          <p class="hint">Played in place, nothing linked. New files in these folders join the rotation by themselves.</p>
+          <ul class="sources" id="sources-list"></ul>
+          <div class="row-actions">
+            <button class="ghost small" data-goto="add">Add a folder</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="kicker">Playback</div>
+          <label class="switch"><input type="checkbox" id="shuffle"><span class="track"></span>Shuffle</label>
+          <label class="switch"><input type="checkbox" id="loop"><span class="track"></span>Loop forever</label>
+          <div class="row-actions">
+            <button class="ghost small" id="prune">Prune broken links</button>
+          </div>
+        </div>
+        <p class="hint" id="backend-note"></p>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

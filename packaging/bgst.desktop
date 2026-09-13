@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=bgst
+GenericName=Game Soundtrack Player
+Comment=Play a custom soundtrack with ambient or silent gaps between songs
+Exec=bgst ui
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;soundtrack;ambient;game;
+StartupNotify=true
+Icon=multimedia-audio-player

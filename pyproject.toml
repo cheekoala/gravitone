@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bgsoundtrack"
+version = "0.1.0"
+description = "Play a custom game soundtrack with random silence or ambience between songs"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+classifiers = [
+  "Environment :: Console",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Sound/Audio :: Players",
+]
+
+[project.scripts]
+bgst = "bgsoundtrack.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/cheekoala/custom_bg_game_soundtrack_player"
+
+[tool.setuptools]
+packages = ["bgsoundtrack"]
+
+[tool.setuptools.package-data]
+bgsoundtrack = ["ui/*"]
