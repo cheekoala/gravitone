@@ -36,17 +36,52 @@
   let browsePath = null;
   let toastTimer = null;
   const libraries = { music: null, ambient: null };
+  const filters = { music: "", ambient: "" };
+  const limits = { music: 400, ambient: 400 };   // rows built at once
 
   // -- server ---------------------------------------------------------
-  async function api(route, body) {
+  let inFlight = 0;
+  function busy(delta) {
+    inFlight = Math.max(0, inFlight + delta);
+    $("activity").classList.toggle("on", inFlight > 0);
+  }
+
+  // Wrap a button so a click visibly does something, however slow the
+  // answer is.
+  async function withSpinner(button, work) {
+    if (!button) return work();
+    const label = button.innerHTML;
+    button.classList.add("busy");
+    button.innerHTML = `<span class="spinner"></span>${button.textContent.trim()}`;
+    try {
+      return await work();
+    } finally {
+      button.classList.remove("busy");
+      button.innerHTML = label;
+    }
+  }
+
+  async function api(route, body, quiet) {
     if (!SERVED) throw new Error("not served by bgst");
+    if (!quiet) busy(1);
+    try {
+      return await request(route, body);
+    } finally {
+      if (!quiet) busy(-1);
+    }
+  }
+
+  async function request(route, body) {
     const res = await fetch(`/api/${route}`, {
       method: body === undefined ? "GET" : "POST",
       headers: { "X-BGST-Token": TOKEN, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const payload = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    if (!res.ok) {
+      throw new Error(payload.hint ? `${payload.error} — ${payload.hint}` : payload.error
+        || `HTTP ${res.status}`);
+    }
     return payload;
   }
 
@@ -59,8 +94,9 @@
     toastTimer = setTimeout(() => { node.hidden = true; }, 3600);
   }
 
-  function offline(detail) {
+  function offline(detail, lead) {
     $("offline").hidden = false;
+    if (lead) $("offline-lead").textContent = lead;
     if (detail) $("offline-detail").textContent = detail;
   }
 
@@ -70,7 +106,12 @@
       if (next && next.config) render(next);
       return next;
     } catch (err) {
-      toast(err.message, true);
+      // The usual cause of an unknown setting is a page newer than the
+      // server that is serving it.
+      toast(/unknown setting/i.test(err.message)
+        ? `${err.message} — this page is newer than the bgst running it. `
+          + `Restart it: bgst ui --stop, then bgst ui.`
+        : err.message, true);
       return null;
     }
   }
@@ -161,8 +202,11 @@
     const kinds = { track: "Now playing", ambient: "Ambience", silence: "Silence" };
     $("now-kind").textContent = now ? kinds[now.kind] : (running ? "Starting" : "Idle");
     $("now-title").textContent = now
-      ? (now.kind === "silence" ? "Quiet" : now.name)
+      ? (now.kind === "silence" ? "Quiet" : (now.label || now.name))
       : (next.error ? "Stopped" : "Nothing playing");
+    const sub = now && now.kind !== "silence" && now.label !== now.name ? now.name : "";
+    $("now-sub").textContent = sub;
+    renderCover(now);
     const hiddenNow = inGap && next.hidden;
     const pct = now && now.duration ? Math.min(100, (now.elapsed / now.duration) * 100) : 0;
     $("now-progress").style.width = hiddenNow ? "100%" : `${pct}%`;
@@ -190,8 +234,19 @@
     renderLibrary("music");
     renderLibrary("ambient");
     renderSources(next);
+    renderServer(next);
 
     if (!document.activeElement || document.activeElement.type !== "range") syncSettings(config);
+
+    if (next.stale) {
+      offline(
+        "The version still running is the old one, so this page and it no longer "
+        + "agree — restart it: bgst ui --stop, then bgst ui.",
+        "bgst was updated."
+      );
+    } else if (!$("offline").hidden && failures === 0) {
+      $("offline").hidden = true;
+    }
 
     const players = next.players.length ? next.players.join(", ") : "none found";
     let note = `Players available: ${players}. ` +
@@ -201,6 +256,33 @@
     $("backend-note").textContent = note;
     $("pick-folder").hidden = !next.picker;
   }
+
+  let coverShown = null;
+
+  function renderCover(now) {
+    const holder = $("now-cover");
+    const wanted = now && now.art ? now.name : null;
+    if (wanted === coverShown) return;
+    coverShown = wanted;
+    if (!wanted) {
+      holder.replaceChildren(document.createTextNode("♪"));
+      holder.className = "cover empty";
+      return;
+    }
+    const image = el("img", "cover");
+    image.src = coverUrl(now);
+    image.alt = "";
+    image.addEventListener("error", () => {
+      holder.replaceChildren(document.createTextNode("♪"));
+      holder.className = "cover empty";
+    });
+    holder.replaceChildren(image);
+    holder.className = "cover-holder";
+  }
+
+  const coverUrl = (track) =>
+    `/api/cover?track=${encodeURIComponent(track.path || track.target || "")}`
+    + `&t=${encodeURIComponent(TOKEN)}`;
 
   function renderPlaylistPicker(next) {
     const picker = $("playlist-select");
@@ -220,7 +302,19 @@
 
   function renderSortPickers(next) {
     const showFiles = next.config.show_filenames;
-    document.querySelectorAll("input.filenames").forEach((box) => {
+    document.querySelectorAll("input.filter").forEach((box) => {
+    let timer = null;
+    box.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const name = box.dataset.filterFor;
+        filters[name] = box.value;
+        limits[name] = 400;
+        renderLibrary(name);
+      }, 120);
+    });
+  });
+  document.querySelectorAll("input.filenames").forEach((box) => {
       box.checked = showFiles;
     });
     // The first column is whichever of the two you chose to look at, so its
@@ -339,16 +433,36 @@
       const cell = el("td", null, name === "music"
         ? "No music yet — open Add, then add a folder or link files."
         : "No ambience yet — rain, wind, room tone, a distant tavern.");
-      cell.colSpan = 6;
+      cell.colSpan = 7;
       row.append(cell);
       body.append(row);
       return;
     }
 
     const playing = state.now && state.now.name;
-    data.tracks.forEach((track) => {
+    const needle = filters[name].trim().toLowerCase();
+    const matches = needle
+      ? data.tracks.filter((track) =>
+          [track.name, track.title, track.artist, track.album]
+            .filter(Boolean)
+            .some((field) => field.toLowerCase().includes(needle)))
+      : data.tracks;
+    // A library of thousands would put tens of thousands of nodes in the
+    // page and make every interaction sticky, so only a window is built -
+    // the filter box is how you reach the rest.
+    const shown = matches.slice(0, limits[name]);
+    const CHUNK = 150;
+    const build = (track) => {
       const row = el("tr", track.name === playing && state.running ? "playing" : null);
-      row.append(el("td", "col-no", track.track ? String(track.track) : ""));
+      const cover = el("td", "col-cover");
+      if (track.art) {
+        const thumb = el("img", "thumb");
+        thumb.src = coverUrl(track);
+        thumb.alt = "";
+        thumb.loading = "lazy";
+        cover.append(thumb);
+      }
+      row.append(cover, el("td", "col-no", track.track ? String(track.track) : ""));
 
       const title = el("td", "col-title");
       title.append(el("div", "t-title", showFiles ? track.name : (track.title || track.name)));
@@ -379,12 +493,43 @@
       remove.addEventListener("click", () => removeTrack(track.name, name));
       actions.append(remove);
       row.append(actions);
-      body.append(row);
-    });
+      return row;
+    };
+
+    const rows = shown;
+    const paint = (from) => {
+      const fragment = document.createDocumentFragment();
+      for (let i = from; i < Math.min(from + CHUNK, rows.length); i += 1) {
+        fragment.append(build(rows[i]));
+      }
+      body.append(fragment);
+      if (from + CHUNK < rows.length && libraries[name] === data) {
+        requestAnimationFrame(() => paint(from + CHUNK));
+      }
+    };
+    paint(0);
+
+    if (matches.length > shown.length) {
+      const more = el("tr", "more-row");
+      const cell = el("td");
+      cell.colSpan = 7;
+      cell.append(
+        document.createTextNode(`Showing ${shown.length} of ${matches.length} — filter to narrow it down`)
+      );
+      const all = el("button", "ghost small", "Show all");
+      all.addEventListener("click", () => {
+        limits[name] = matches.length;
+        renderLibrary(name);
+      });
+      cell.append(all);
+      more.append(cell);
+      body.append(more);
+    }
 
     broken.forEach((brokenName) => {
       const row = el("tr", "broken");
       row.append(
+        el("td", "col-cover", ""),
         el("td", "col-no", ""),
         el("td", "col-title", brokenName),
         el("td", "col-artist", "—"),
@@ -394,6 +539,24 @@
       );
       body.append(row);
     });
+  }
+
+  function renderServer(next) {
+    $("srv-url").textContent = location.host;
+    $("srv-pid").textContent = next.pid || "—";
+    $("srv-version").textContent = next.version || "—";
+    const up = next.started ? (Date.now() / 1000) - next.started : 0;
+    $("srv-up").textContent = up > 3600
+      ? `${Math.floor(up / 3600)}h ${Math.floor((up % 3600) / 60)}m`
+      : (up > 60 ? `${Math.floor(up / 60)}m` : `${Math.max(0, Math.floor(up))}s`);
+
+    const note = $("srv-note");
+    const jobs = [];
+    if (next.indexing) jobs.push(`indexing ${next.indexing} folder(s)`);
+    if (next.tags_pending) jobs.push(`reading ${next.tags_pending} tag(s)`);
+    if (next.art_pending) jobs.push(`looking for ${next.art_pending} cover(s)`);
+    note.hidden = !jobs.length;
+    if (jobs.length) note.innerHTML = `<span class="spinner"></span> ${jobs.join(", ")}…`;
   }
 
   function renderSources(next) {
@@ -709,7 +872,7 @@
   }
 
   document.querySelectorAll("[data-export]").forEach((button) =>
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => withSpinner(button, async () => {
       const kind = button.dataset.export;
       const suggested = EXPORT_NAMES[kind];
       const picked = await askForPath("save", `Export ${kind === "bundle" ? "bundle" : "manifest"}`, suggested);
@@ -717,8 +880,8 @@
         askInline("Export", `where to write ${suggested}`, (path) => doExport(kind, path));
         return;
       }
-      if (picked) doExport(kind, picked);
-    }));
+      if (picked) await doExport(kind, picked);
+    })));
 
   $("import-file").addEventListener("click", async () => {
     const picked = await askForPath("files", "Choose a bgst export to import", "");
@@ -782,6 +945,18 @@
   $("playlist-select").addEventListener("change", (event) => selectPlaylist(event.target.value));
   document.querySelectorAll("th[data-sort]").forEach((head) =>
     head.addEventListener("click", () => sortBy(head.dataset.sort)));
+  document.querySelectorAll("input.filter").forEach((box) => {
+    let timer = null;
+    box.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const name = box.dataset.filterFor;
+        filters[name] = box.value;
+        limits[name] = 400;
+        renderLibrary(name);
+      }, 120);
+    });
+  });
   document.querySelectorAll("input.filenames").forEach((box) =>
     box.addEventListener("change", async () => {
       // Follow the column across: sorting by the first column keeps sorting
@@ -815,6 +990,32 @@
     if (!value || !browsePath) return;
     if (await createPlaylist(value, browsePath)) $("folder-playlist-form").hidden = true;
   });
+  $("srv-restart").addEventListener("click", (event) =>
+    withSpinner(event.currentTarget, async () => {
+      const done = await call("server", { action: "restart" });
+      if (done) {
+        toast("Restarting — this page reconnects by itself");
+        // The new process keeps the token, so polling picks it back up.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    }));
+
+  $("srv-stop").addEventListener("click", (event) =>
+    withSpinner(event.currentTarget, async () => {
+      await call("server", { action: "stop" });
+      offline("Start it again with: bgst ui", "The server was stopped from here.");
+    }));
+
+  $("find-covers").addEventListener("click", (event) =>
+    withSpinner(event.currentTarget, async () => {
+      const done = await call("covers", {});
+      if (done) {
+        toast(done.result
+          ? `Looking for art on ${done.result} track(s) — the table fills in as it goes`
+          : "Nothing left to look for");
+      }
+    }));
+
   $("prune").addEventListener("click", async () => {
     const next = await call("prune", {});
     if (next) { invalidate(); toast(`${next.result.length} broken link(s) removed`); }
@@ -871,9 +1072,9 @@
   let failures = 0;
   async function poll() {
     try {
-      render(await api("state"));
+      render(await api("state", undefined, true));   // quiet: no activity bar
       failures = 0;
-      $("offline").hidden = true;
+      if (!state || !state.stale) $("offline").hidden = true;
     } catch (err) {
       $("now-kind").textContent = "Disconnected";
       if (!SERVED) {
@@ -882,7 +1083,9 @@
         offline(
           /token/i.test(err.message)
             ? "This page's key is out of date — open the link bgst printed, or run 'bgst ui' again."
-            : `Cannot reach the bgst server (${err.message}). Is it still running?`
+            : `${err.message}. It may have stopped, or been updated while running — `
+              + `restart it: bgst ui --stop, then bgst ui.`,
+          /token/i.test(err.message) ? "That key is not valid." : "Lost the bgst server."
         );
       }
     }

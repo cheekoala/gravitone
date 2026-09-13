@@ -9,6 +9,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>♪</text></svg>">
 </head>
 <body>
+<div class="activity" id="activity"></div>
 <div class="app">
 
   <header class="topbar">
@@ -43,7 +44,7 @@
   </header>
 
   <div class="offline" id="offline" hidden>
-    <strong>This page needs the bgst server.</strong>
+    <strong id="offline-lead">This page needs the bgst server.</strong>
     <span id="offline-detail">Start it with <code>bgst ui</code> — it opens the working page for you.
     Opening <code>index.html</code> straight from the folder cannot reach your files.</span>
   </div>
@@ -76,8 +77,14 @@
       <!-- NOW -->
       <section class="panel active" id="panel-now">
         <div class="card now">
-          <div class="kicker" id="now-kind">Idle</div>
-          <div class="now-title" id="now-title">Nothing playing</div>
+          <div class="now-head">
+            <div class="cover empty" id="now-cover">♪</div>
+            <div class="now-body">
+              <div class="kicker" id="now-kind">Idle</div>
+              <div class="now-title" id="now-title">Nothing playing</div>
+              <div class="t-sub" id="now-sub"></div>
+            </div>
+          </div>
           <div class="progress"><div class="progress-fill" id="now-progress"></div></div>
           <div class="now-meta">
             <span id="now-elapsed">0:00</span>
@@ -109,6 +116,7 @@
         <div class="panel-head">
           <h2>Music <span class="count" id="music-count">0</span></h2>
           <div class="head-tools">
+            <input type="search" class="filter" data-filter-for="music" placeholder="Filter…" autocomplete="off" spellcheck="false">
             <label class="switch inline"><input type="checkbox" class="filenames"><span class="track"></span>File names</label>
             <button class="ghost small" data-goto="add">Add music</button>
           </div>
@@ -118,6 +126,7 @@
           <table class="tracks" id="music-table">
             <thead>
               <tr>
+                <th class="col-cover"></th>
                 <th class="col-no">#</th>
                 <th class="col-title" data-sort="title"><span></span></th>
                 <th class="col-artist" data-sort="artist"><span>Artist</span></th>
@@ -135,6 +144,7 @@
         <div class="panel-head">
           <h2>Ambient <span class="count" id="ambient-count">0</span></h2>
           <div class="head-tools">
+            <input type="search" class="filter" data-filter-for="ambient" placeholder="Filter…" autocomplete="off" spellcheck="false">
             <label class="switch inline"><input type="checkbox" class="filenames"><span class="track"></span>File names</label>
             <button class="ghost small" data-goto="add">Add ambience</button>
           </div>
@@ -145,6 +155,7 @@
           <table class="tracks" id="ambient-table">
             <thead>
               <tr>
+                <th class="col-cover"></th>
                 <th class="col-no">#</th>
                 <th class="col-title" data-sort="title"><span></span></th>
                 <th class="col-artist" data-sort="artist"><span>Artist</span></th>
@@ -237,6 +248,21 @@
           <div class="row-actions">
             <button class="ghost small" data-goto="add">Add a folder</button>
           </div>
+        </div>
+        <div class="card">
+          <div class="kicker">Server</div>
+          <div class="server-facts">
+            <div class="fact"><span class="k">Address</span><span class="v" id="srv-url">—</span></div>
+            <div class="fact"><span class="k">Process</span><span class="v" id="srv-pid">—</span></div>
+            <div class="fact"><span class="k">Up</span><span class="v" id="srv-up">—</span></div>
+            <div class="fact"><span class="k">Version</span><span class="v" id="srv-version">—</span></div>
+          </div>
+          <div class="add-tools">
+            <button class="ghost small" id="srv-restart">Restart server</button>
+            <button class="ghost small" id="srv-stop">Stop server</button>
+            <button class="ghost small" id="find-covers">Find album art</button>
+          </div>
+          <p class="hint" id="srv-note" hidden></p>
         </div>
         <div class="card">
           <div class="kicker">Export &amp; import</div>

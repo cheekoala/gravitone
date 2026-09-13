@@ -120,6 +120,41 @@ playlist), `q` quits.
   . silence (0:19)
 ```
 
+## Speed and stability
+
+Everything that walks the disk happens on one background worker, never on a
+request. The folder index is written to `~/.config/bgsoundtrack/index.json`,
+so a restart starts with answers rather than work, and the state the UI polls
+once a second is worked out only when something actually changes.
+
+On a 2000-file library: a poll costs ~0.02 ms (it used to re-walk every
+folder), and the server starts answering immediately instead of after the
+first scan. Tag reads and cover extraction also happen in the background —
+the Server card in Config shows what is being worked on.
+
+The track table builds 400 rows at a time and has a **filter box**; with
+thousands of tracks the page stays responsive instead of parking tens of
+thousands of nodes in the DOM. *Show all* is there when you want it.
+
+Anything in flight shows a thin sweeping bar across the top of the window,
+and buttons that take a moment (exporting a bundle, finding art) spin while
+they work.
+
+## Server controls
+
+Config → **Server** shows the address, the process id, how long it has been
+up and its version, with **Restart** and **Stop** buttons. Restart replaces
+the process in place, keeping the same port *and the same token*, so the page
+you clicked it from reconnects by itself.
+
+From a terminal:
+
+```sh
+bgst ui --status      # is one running, where, and since when
+bgst ui --stop        # stop it
+bgst ui --new         # a second one anyway
+```
+
 ## The UI
 
 `bgst ui` serves a small control panel on `127.0.0.1:8765` and opens it. It is
@@ -132,7 +167,8 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 | ![Adding: a whole folder, or just the files in it](docs/ui-add.png) | |
 
 - **Top bar** — the playlist selector; switching it switches what plays.
-- **Now** — what is playing or how long the current gap runs, with history.
+- **Now** — what is playing (named from its tags, with the album cover when
+  there is one) or how long the current gap runs, with history.
 - **Music / Ambient** — the two libraries; `✕` removes a link, never a file.
 - **Add** — *Choose a folder…* opens your desktop's own folder dialog (needs
   Tk; `bgst doctor` says whether you have it). Otherwise browse from the
@@ -191,6 +227,15 @@ as it did, folders and all.
 Playlists live in `~/.config/bgsoundtrack/playlists.json` — plain JSON, easy
 to read, back up, or edit by hand.
 
+## Album art
+
+Covers come from the picture inside the file (extracted once with ffmpeg) or
+from a `cover.jpg` / `folder.jpg` sitting beside it. The current track shows
+its cover in Now, and the table shows thumbnails for what has been found.
+**Config → Find album art** goes looking for the whole playlist in the
+background; art is cached in `~/.config/bgsoundtrack/covers/`, one per folder,
+since a record shares its cover.
+
 ## The track table
 
 Each library is a table — track number, title, artist, album, length — and
@@ -215,8 +260,8 @@ tag. Tags are read in the background and cached in
 table fills in the moment the read lands, and says how many are left while it
 works.
 
-On a phone the artist, album and length columns fold away, leaving the track
-and its title.
+The header stays put while you scroll, and on a phone the artist, album and
+length columns fold away, leaving the track and its title.
 
 ## Export and import
 
@@ -400,6 +445,24 @@ desktop's volume mixer shows one **bgst** entry to ride rather than a new
 If `pactl` is missing (a pure-ALSA box, macOS, Windows), a volume change
 applies from the next track and the UI says so.
 
+## After an upgrade
+
+Reinstalling replaces the files on disk, but a UI that is **already running**
+keeps the old code in memory while serving the new page from disk — so the
+page asks for things the server has never heard of (`unknown setting
+'sort_desc'`), or columns come up empty. bgst now notices:
+
+- the page shows a banner saying it was updated and what to run;
+- `bgst ui` refuses to quietly hand you the stale one: in a terminal it offers
+  to restart it, and from a shortcut it says so in a dialog;
+- `bgst doctor` reports it too.
+
+The fix is always the same:
+
+```sh
+bgst ui --stop && bgst ui
+```
+
 ## When the shortcut seems to do nothing
 
 A desktop shortcut runs with no terminal, so anything printed is lost. bgst
@@ -411,6 +474,7 @@ whichever exists), including "running, but no browser opened — go to
 | --- | --- |
 | Port 8765 already taken | moves to the next free port, or says so with `--port` |
 | A UI already running | opens the browser at that one; `--stop` to end it |
+| Upgraded while running | banner in the page, offer to restart from the terminal |
 | `bgst: command not found` | `~/.local/bin` is not on PATH — see Install, or use the full path |
 | Started from the installer, terminal closed | now launched detached, survives it |
 

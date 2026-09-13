@@ -6,6 +6,7 @@ through this object. Everything here is safe to call from a request handler.
 
 from __future__ import annotations
 
+import os
 import random
 import threading
 import time
@@ -13,9 +14,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from bgsoundtrack import (
+    __version__,
+    art as art_module,
     config as config_module,
     engine,
     library,
+    instance,
     picker,
     player,
     playlists,
@@ -63,6 +67,12 @@ class Session:
         # Bumped when a background read finishes, so the UI knows the table
         # it is showing has been overtaken by real tags.
         self._tags_version = 0
+        self._counts: tuple | None = None   # memo, keyed by what can change it
+        self._art = art_module.Art(art_module.cache_dir(self.config_path))
+        self._art_pending = 0
+        self._started = time.time()
+        self._started = time.time()
+        library.configure_index(self._index_path())
 
     # -- state -----------------------------------------------------------
 
@@ -71,23 +81,29 @@ class Session:
         thread = self._thread
         return thread is not None and thread.is_alive()
 
-    def snapshot(self) -> dict:
-        """Small enough to poll once a second; track lists live in library()."""
-        now = self._now
-        return {
-            "running": self.running,
-            "error": self._error,
-            "backend": self._backend.name if self._backend else None,
-            "players": player.available(),
-            "picker": self.picker_available,
-            "sort": self.config.sort_by,
-            "sorts": list(library.SORTS),
-            "tags_pending": self._tags_pending,
-            "tags_version": self._tags_version,
-            "history": list(self._history[-12:]),
-            "now": None if now is None else self._describe(now),
-            "hidden": self.config.hide_gaps,
-            "config": self.config.to_dict(),
+    def _index_path(self) -> Path:
+        base = self.config_path or config_module.config_path()
+        return base.parent / "index.json"
+
+    def _library_state(self) -> dict:
+        """Counts, broken links and folder sizes - worked out once per change.
+
+        This is polled every second, so it must not walk anything; it is
+        recomputed only when the playlists, the folder index or the library
+        folders have actually moved.
+        """
+        key = (
+            self.store.version,
+            library.SCANNER.version,
+            self.playlist.id,
+            len(self.playlist.excluded),
+            tuple(self.playlist.music_sources),
+            tuple(self.playlist.ambient_sources),
+        )
+        if self._counts and self._counts[0] == key:
+            return self._counts[1]
+
+        value = {
             "counts": {
                 section: len(library.entries(self.config, section, self.playlist))
                 for section in library.SECTIONS
@@ -102,6 +118,36 @@ class Session:
             "sources": {
                 section: self.sources(section) for section in library.SECTIONS
             },
+        }
+        self._counts = (key, value)
+        return value
+
+    def snapshot(self) -> dict:
+        """Small enough to poll once a second; track lists live in library()."""
+        now = self._now
+        return {
+            "running": self.running,
+            "error": self._error,
+            "backend": self._backend.name if self._backend else None,
+            "players": player.available(),
+            "picker": self.picker_available,
+            "version": __version__,
+            # Updated underneath ourselves? Then this process is serving a
+            # newer page than the code it is running.
+            "stale": instance.process_is_stale(),
+            "sort": self.config.sort_by,
+            "sorts": list(library.SORTS),
+            "tags_pending": self._tags_pending,
+            "tags_version": self._tags_version,
+            "art_pending": self._art_pending,
+            "started": self._started,
+            "pid": os.getpid(),
+            "history": list(self._history[-12:]),
+            "now": None if now is None else self._describe(now),
+            "hidden": self.config.hide_gaps,
+            "config": self.config.to_dict(),
+            **self._library_state(),
+            "indexing": library.SCANNER.pending,
             "playlists": [
                 {
                     "id": item.id,
@@ -120,6 +166,13 @@ class Session:
             ],
         }
 
+    def _label(self, path: Path) -> str:
+        """What to call a track: its tags if we have them, else its file name."""
+        known = self._tags.known(path)
+        if known.guessed or not known.title:
+            return path.name
+        return f"{known.title} — {known.artist}" if known.artist else known.title
+
     def _describe(self, now: NowPlaying) -> dict:
         """What the UI may know about what is playing.
 
@@ -127,9 +180,18 @@ class Session:
         - a countdown you can read is not a silence you can sink into.
         """
         hide = self.config.hide_gaps and now.kind != "track"
+        known = self._tags.known(Path(now.path)) if now.path else None
+        cover = self._art.cached(Path(now.path)) if now.path else None
         return {
             "kind": now.kind,
             "name": now.name,
+            "path": now.path,
+            # The player says what the tags say, and falls back to the file.
+            "label": self._label(Path(now.path)) if now.path else now.name,
+            "title": known.title if known and not known.guessed else "",
+            "artist": known.artist if known else "",
+            "album": known.album if known else "",
+            "art": bool(cover),
             "duration": None if hide else now.duration,
             "elapsed": None if hide else round(now.elapsed(), 2),
         }
@@ -155,6 +217,7 @@ class Session:
                     "origin": entry.origin,
                     "source": str(entry.source) if entry.source else None,
                     **self._tag_fields(entry.target),
+                    "art": bool(self._art.cached(entry.target)),
                 }
                 for entry in found
             ],
@@ -166,12 +229,13 @@ class Session:
     def sources(self, section: str) -> list[dict]:
         listed = []
         for directory in self.playlist.sources(section):
-            exists = directory.is_dir()
             listed.append(
                 {
                     "path": str(directory),
-                    "exists": exists,
-                    "count": len(library.scan(directory)) if exists else 0,
+                    "exists": directory.is_dir(),
+                    # From the index; a folder nobody has walked yet reads 0
+                    # until the worker gets to it, rather than blocking here.
+                    "count": len(library.scan(directory, block_if_unknown=False)),
                 }
             )
         return listed
@@ -206,6 +270,12 @@ class Session:
         # Bumped when a background read finishes, so the UI knows the table
         # it is showing has been overtaken by real tags.
         self._tags_version = 0
+        self._counts: tuple | None = None   # memo, keyed by what can change it
+        self._art = art_module.Art(art_module.cache_dir(self.config_path))
+        self._art_pending = 0
+        self._started = time.time()
+        self._started = time.time()
+        library.configure_index(self._index_path())
 
         self._tag_thread = threading.Thread(target=work, daemon=True, name="bgst-tags")
         self._tag_thread.start()
@@ -264,8 +334,10 @@ class Session:
             duration=event.duration,
         )
         if event.kind == "track":
-            self._history.append(name)
+            self._history.append(self._label(event.path))
             self._probe_async(event.path, self._now)
+        if event.path:
+            self._art.want(event.path)
 
     def _probe_async(self, path: Path, entry: NowPlaying) -> None:
         """Fill in the track length in the background - ffprobe must not
@@ -421,6 +493,43 @@ class Session:
         self.store.save()
         self.store.touch()
         return playlist.id
+
+    # -- covers ----------------------------------------------------------
+
+    def cover(self, track: str) -> Path | None:
+        """The cover for a track we know about - and only for such a track."""
+        path = Path(track).expanduser()
+        for section in library.SECTIONS:
+            for entry in library.entries(self.config, section, self.playlist):
+                if str(entry.target) == str(path):
+                    return self._art.cached(entry.target) or self._art.find(entry.target)
+        return None
+
+    def find_covers(self) -> int:
+        """Go looking for art for everything in this playlist, in the
+        background. Returns how many tracks it will look at."""
+        targets = [
+            entry.target
+            for section in library.SECTIONS
+            for entry in library.entries(self.config, section, self.playlist)
+        ]
+        wanted = [path for path in targets if self._art.cached(path) is None]
+        if not wanted or self._art_pending:
+            return 0
+        self._art_pending = len(wanted)
+
+        def work() -> None:
+            seen = set()
+            for path in wanted:
+                if str(path.parent) not in seen:
+                    seen.add(str(path.parent))
+                    self._art.find(path)
+                self._art_pending = max(0, self._art_pending - 1)
+            self._art_pending = 0
+            self._tags_version += 1      # the table has new thumbnails
+
+        threading.Thread(target=work, daemon=True, name="bgst-art-scan").start()
+        return len(wanted)
 
     def pick(
         self, kind: str = "folder", title: str = "Choose a folder", suggested: str = ""

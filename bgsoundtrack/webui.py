@@ -20,6 +20,7 @@ import signal
 import socket
 import sys
 import time
+import traceback
 import threading
 import webbrowser
 from http import HTTPStatus
@@ -114,11 +115,26 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def _send_cacheable(self, body: bytes, content_type: str) -> None:
+        """Covers never change under the same URL, so let the browser keep them."""
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "private, max-age=86400")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
     def _json(self, payload, status: int = HTTPStatus.OK) -> None:
         self._send(status, json.dumps(payload).encode("utf-8"), "application/json")
 
-    def _authorized(self) -> bool:
+    def _authorized(self, url=None) -> bool:
         supplied = self.headers.get("X-BGST-Token", "")
+        if not supplied and url is not None and url.path == "/api/cover":
+            # An <img> cannot send a header, so the cover route - and only
+            # that route - accepts the token in the query string.
+            supplied = (parse_qs(url.query).get("t") or [""])[0]
         return secrets.compare_digest(supplied, self.token)
 
     def _body(self) -> dict:
@@ -155,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(HTTPStatus.OK, candidate.read_bytes(), content_type)
 
     def _api(self, url, method: str) -> None:
-        if not self._authorized():
+        if not self._authorized(url):
             self._json({"error": "bad or missing token"}, HTTPStatus.FORBIDDEN)
             return
         route = url.path[len("/api/"):]
@@ -179,6 +195,21 @@ class Handler(BaseHTTPRequestHandler):
         except player.PlaybackError as exc:
             self._json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
             return
+        except Exception as exc:  # noqa: BLE001 - an answer beats a dead socket
+            # Without this the connection just closes and the page shows
+            # "disconnected", which says nothing about what went wrong.
+            traceback.print_exc()
+            self._json(
+                {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "hint": "if bgst was updated while running, restart it: "
+                    "bgst ui --stop, then bgst ui",
+                },
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
+            return
+        if payload is SENT:
+            return
         if payload is None:
             self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
@@ -190,6 +221,17 @@ class Handler(BaseHTTPRequestHandler):
             return session.snapshot()
         if route == "browse" and method == "GET":
             return browse((query.get("path") or [None])[0])
+        if route == "cover" and method == "GET":
+            track = (query.get("track") or [""])[0]
+            if not track:
+                raise ValueError("cover needs a track")
+            found = session.cover(track)
+            if found is None:
+                self._send(HTTPStatus.NOT_FOUND, b"no cover", "text/plain")
+                return SENT
+            kind = mimetypes.guess_type(found.name)[0] or "image/jpeg"
+            self._send_cacheable(found.read_bytes(), kind)
+            return SENT
         if route == "library" and method == "GET":
             section = (query.get("section") or ["music"])[0]
             if section not in library.SECTIONS:
@@ -274,6 +316,17 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("import needs a path")
             result = session.import_file(path, body.get("name"))
             return {**session.snapshot(), "result": result}
+        elif route == "covers":
+            return {**session.snapshot(), "result": session.find_covers()}
+        elif route == "server":
+            action = body.get("action", "")
+            if action == "stop":
+                threading.Timer(0.3, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+                return {"stopping": True}
+            if action == "restart":
+                threading.Timer(0.3, _restart).start()
+                return {"restarting": True, "url": self.server.url}
+            raise ValueError(f"unknown server action {action!r}")
         elif route == "pick":
             # Blocks until the person at the machine answers the dialog.
             picked = session.pick(
@@ -291,6 +344,24 @@ class Handler(BaseHTTPRequestHandler):
         return session.snapshot()
 
 
+def _restart() -> None:
+    """Replace this process with a fresh one, same port, same token.
+
+    Keeping the token means the page that asked for the restart reconnects
+    by itself instead of becoming a dead tab.
+    """
+    import os as _os
+
+    environment = dict(_os.environ)
+    token = getattr(_restart, "token", None)
+    if token:
+        environment["BGST_TOKEN"] = token
+    try:
+        _os.execve(sys.executable, [sys.executable, "-m", "bgsoundtrack", *sys.argv[1:]], environment)
+    except OSError:
+        _os.kill(_os.getpid(), signal.SIGTERM)
+
+
 def _lan_address() -> str | None:
     """Best guess at this machine's LAN IP, for the phone-remote hint."""
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -302,6 +373,9 @@ def _lan_address() -> str | None:
     finally:
         probe.close()
 
+
+# A route that already answered for itself (it sent bytes, not JSON).
+SENT = object()
 
 DEFAULT_PORT = 8765
 PORT_TRIES = 12
@@ -348,7 +422,7 @@ def serve(
     fallback: bool = True,
 ) -> ThreadingHTTPServer:
     """Start the UI server. Returns it running on a background thread."""
-    token = token or secrets.token_urlsafe(16)
+    token = token or os.environ.get("BGST_TOKEN") or secrets.token_urlsafe(16)
     handler = type("BoundHandler", (Handler,), {"session": session, "token": token})
     httpd = _bind(host, port, handler, fallback)
     httpd.verbose = verbose
@@ -378,6 +452,30 @@ def run(
     if not new:
         existing = instance_state.running(config_path)
         if existing is not None:
+            stale = instance_state.is_stale(existing)
+            if stale:
+                # It is serving the new page off disk with the old code in
+                # memory, which surfaces as "unknown setting" in the browser.
+                print(
+                    "the bgst that is running started before the current version "
+                    "was installed",
+                    flush=True,
+                )
+                if sys.stdin.isatty():
+                    print(f"restart it? [Y/n] ", end="", flush=True)
+                    reply = sys.stdin.readline().strip().lower()
+                    if not reply.startswith("n"):
+                        instance_state.stop(existing)
+                        instance_state.clear(config_path)
+                        existing = None
+                else:
+                    notify.complain(
+                        "bgst was updated",
+                        "The bgst that is running is from the previous version. "
+                        "Restart it with:\n\n    bgst ui --stop\n    bgst ui",
+                    )
+
+        if not new and existing is not None:
             print(f"bgst ui is already running  {existing.url}", flush=True)
             if open_browser and not webbrowser.open(existing.url):
                 notify.complain(
@@ -413,6 +511,7 @@ def run(
         notify.complain("bgst could not start", f"could not start the UI: {exc}")
         return 1
 
+    _restart.token = httpd.token      # so a restart keeps open pages alive
     instance_state.write(
         instance_state.Instance(
             pid=os.getpid(),
@@ -459,6 +558,21 @@ def run(
         session.stop()
         httpd.shutdown()
         instance_state.clear(config_path)
+    return 0
+
+
+def status(config_path: Path | None = None) -> int:
+    """`bgst ui --status`: what is running, where, and since when."""
+    existing = instance_state.running(config_path)
+    if existing is None:
+        print("no bgst ui is running")
+        return 1
+    age = max(0, int(time.time() - existing.started)) if existing.started else 0
+    shape = f"{age // 3600}h {(age % 3600) // 60}m" if age >= 3600 else f"{age // 60}m {age % 60}s"
+    print(f"running   pid {existing.pid} on port {existing.port}, up {shape}")
+    print(f"url       {existing.url}")
+    if instance_state.is_stale(existing):
+        print("note      it predates the installed version - restart it")
     return 0
 
 

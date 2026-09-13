@@ -353,6 +353,17 @@ def cmd_doctor(args) -> int:
 
     found = player.available()
     print(f"players found   {', '.join(found) if found else 'NONE'}")
+    import shutil
+
+    from bgsoundtrack import instance
+
+    probe = shutil.which("ffprobe")
+    print(f"tags & lengths  {'ffprobe' if probe else 'NO ffprobe - no titles or lengths'}")
+    if instance.process_is_stale():
+        print(
+            "update pending   bgst was installed again after this command's "
+            "version was loaded"
+        )
     chooser = picker.available()
     print(f"file chooser    {'yes' if chooser else 'no (Tk missing or no display)'}")
     if not chooser:
@@ -428,6 +439,8 @@ def cmd_ui(args) -> int:
         return _pick_source(args)
     if args.stop:
         return webui.stop(_config_path(args))
+    if args.status:
+        return webui.status(_config_path(args))
 
     return webui.run(
         config_path=_config_path(args),
@@ -473,16 +486,30 @@ def cmd_play(args) -> int:
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
     runner = engine.Engine(config, backend, rng=rng, controls=controls, store=store)
 
+    from bgsoundtrack import tags as tag_reader
+
+    reader = tag_reader.Reader()
+
+    def label(path: Path) -> str:
+        known = reader.known(path)
+        if known.guessed or not known.title:
+            return path.name
+        return f"{known.title} — {known.artist}" if known.artist else known.title
+
     playing = {"path": None, "kind": None}
 
     def on_event(event: engine.Event) -> None:
         playing["path"], playing["kind"] = event.path, event.kind
         # Hidden mode: say that a gap is happening, never how long it runs.
-        length = "" if config.hide_gaps else f" ({_fmt(event.duration)})"
+        # (Only gaps carry a duration; a track event has none.)
+        length = (
+            "" if config.hide_gaps or event.duration is None
+            else f" ({_fmt(event.duration)})"
+        )
         if event.kind == "track":
-            print(f"♪ {event.path.name}", flush=True)
+            print(f"♪ {label(event.path)}", flush=True)
         elif event.kind == "ambient":
-            print(f"  ~ {event.path.name}{length}", flush=True)
+            print(f"  ~ {label(event.path)}{length}", flush=True)
         elif event.kind == "silence":
             print(f"  . silence{length}", flush=True)
         elif event.kind == "done":
@@ -663,6 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--new", action="store_true", help="start another UI even if one is running"
     )
     p.add_argument("--stop", action="store_true", help="stop the running UI")
+    p.add_argument("--status", action="store_true", help="is one running, and where")
     p.add_argument(
         "--host",
         default="127.0.0.1",
