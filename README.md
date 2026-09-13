@@ -55,7 +55,12 @@ pipx install .          # or: pip install --user .
 ```
 
 The installer offers to add a menu entry and a desktop shortcut (`--shortcut`
-/ `--no-shortcut` to decide up front; `-Shortcut` / `-NoShortcut` on Windows).
+/ `--no-shortcut` to decide up front; `-Shortcut` / `-NoShortcut` on Windows),
+and to put `~/.local/bin` on your PATH if it isn't already (`--path` /
+`--no-path`) — otherwise `bgst` installs fine and then `command not found`.
+It writes one line to your shell's own profile (`.zshrc`, `.bashrc`,
+`config.fish`, `.profile`), once; open a new terminal afterwards. Until then
+the full path works: `~/.local/bin/bgst ui`.
 
 When it offers to open the control panel at the end, it starts it **detached**
 (`setsid`), so the UI keeps running after that terminal window closes —
@@ -333,6 +338,7 @@ whichever exists), including "running, but no browser opened — go to
 | --- | --- |
 | Port 8765 already taken | moves to the next free port, or says so with `--port` |
 | A UI already running | opens the browser at that one; `--stop` to end it |
+| `bgst: command not found` | `~/.local/bin` is not on PATH — see Install, or use the full path |
 | Started from the installer, terminal closed | now launched detached, survives it |
 
 Its log, when started from the installer or a shortcut, is

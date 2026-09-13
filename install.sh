@@ -5,6 +5,8 @@
 #   ./install.sh --with-player   also install an audio player (asks first)
 #   ./install.sh --shortcut      add menu and desktop shortcuts without asking
 #   ./install.sh --no-shortcut   skip the shortcuts
+#   ./install.sh --path          put ~/.local/bin on your PATH without asking
+#   ./install.sh --no-path       leave your shell profile alone
 #   ./install.sh --uninstall     remove it again
 #
 # Double-clicking this in Dolphin, Nautilus or Thunar runs it with no terminal
@@ -35,6 +37,7 @@ die()  { warn "$*"; exit 1; }
 WITH_PLAYER=0
 UNINSTALL=0
 SHORTCUT=ask
+PATH_SETUP=ask
 REOPEN=1
 for arg in "$@"; do
   case "$arg" in
@@ -42,6 +45,8 @@ for arg in "$@"; do
     --uninstall) UNINSTALL=1 ;;
     --shortcut) SHORTCUT=yes ;;
     --no-shortcut) SHORTCUT=no ;;
+    --path) PATH_SETUP=yes ;;
+    --no-path) PATH_SETUP=no ;;
     --no-terminal) REOPEN=0 ;;
     -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option: $arg" ;;
@@ -210,12 +215,78 @@ if [ "$(uname -s)" = "Linux" ] && [ -f "$SRC/packaging/bgst.desktop" ]; then
 fi
 
 # -- PATH ------------------------------------------------------------------
+# Without this, `bgst` installs perfectly and then "command not found".
+profile_for_shell() {
+  case "$(basename "${SHELL:-/bin/sh}")" in
+    zsh) echo "${ZDOTDIR:-$HOME}/.zshrc" ;;
+    bash)
+      # Fedora, Debian and friends source .bashrc for interactive shells.
+      if [ -f "$HOME/.bashrc" ] || [ ! -f "$HOME/.bash_profile" ]; then
+        echo "$HOME/.bashrc"
+      else
+        echo "$HOME/.bash_profile"
+      fi
+      ;;
+    fish) echo "$HOME/.config/fish/config.fish" ;;
+    ksh) echo "$HOME/.kshrc" ;;
+    *) echo "$HOME/.profile" ;;
+  esac
+}
+
+path_line_for() {
+  # Write it relative to $HOME when we can, so the profile stays portable.
+  case "$BIN" in
+    "$HOME"/*) WHERE="\$HOME${BIN#"$HOME"}" ;;
+    *) WHERE="$BIN" ;;
+  esac
+  case "$1" in
+    *fish*) echo "fish_add_path \"$WHERE\"" ;;
+    *) echo "export PATH=\"$WHERE:\$PATH\"" ;;
+  esac
+}
+
+add_to_path() {
+  PROFILE=$(profile_for_shell)
+  LINE=$(path_line_for "$PROFILE")
+  if [ -f "$PROFILE" ] && grep -Fq "$BIN" "$PROFILE" 2>/dev/null; then
+    step "$(basename "$PROFILE") already mentions $BIN - open a new terminal"
+    return 0
+  fi
+  mkdir -p "$(dirname "$PROFILE")"
+  {
+    printf '\n# added by the bgst installer\n'
+    printf '%s\n' "$LINE"
+  } >> "$PROFILE"
+  step "Added $BIN to your PATH in $PROFILE"
+  case "$PROFILE" in
+    *fish*) RELOAD="source $PROFILE" ;;   # fish 4 dropped the `.` alias
+    *) RELOAD=". $PROFILE" ;;
+  esac
+  say "    ${DIM}open a new terminal, or run: $RELOAD${OFF}"
+}
+
+ON_PATH=0
 case ":$PATH:" in
-  *":$BIN:"*) ;;
+  *":$BIN:"*) ON_PATH=1 ;;
   *)
     say ""
-    warn "$BIN is not on your PATH. Add this to your shell profile:"
-    say "    export PATH=\"\$HOME/.local/bin:\$PATH\""
+    warn "$BIN is not on your PATH, so typing 'bgst' will not find it yet."
+    if [ "$PATH_SETUP" = "no" ]; then
+      say "Add this to $(profile_for_shell) yourself:"
+      say "    $(path_line_for "$(profile_for_shell)")"
+    elif [ "$PATH_SETUP" = "yes" ] || [ ! -t 0 ]; then
+      add_to_path
+    else
+      printf 'Add it to %s for you? [Y/n] ' "$(basename "$(profile_for_shell)")"
+      read -r reply
+      case "$reply" in
+        [nN]*)
+          say "Left alone. The line you need:"
+          say "    $(path_line_for "$(profile_for_shell)")"
+          ;;
+        *) add_to_path ;;
+      esac
+    fi
     ;;
 esac
 
@@ -242,7 +313,12 @@ if [ -t 0 ]; then
   esac
 fi
 say ""
-say "  ${BOLD}bgst ui${OFF}                     open the control panel"
-say "  ${BOLD}bgst ui --stop${OFF}              stop it again"
-say "  ${BOLD}bgst link ~/Music/album${OFF}     add music (symlinks, no copies)"
-say "  ${BOLD}bgst play${OFF}                   play from the terminal"
+if [ "$ON_PATH" -eq 1 ]; then
+  RUN=$APP
+else
+  RUN="$BIN/$APP"      # works in this terminal, before any profile is reloaded
+fi
+say "  ${BOLD}$RUN ui${OFF}                     open the control panel"
+say "  ${BOLD}$RUN ui --stop${OFF}              stop it again"
+say "  ${BOLD}$RUN link ~/Music/album${OFF}     add music (symlinks, no copies)"
+say "  ${BOLD}$RUN play${OFF}                   play from the terminal"
