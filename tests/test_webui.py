@@ -376,3 +376,46 @@ def test_a_finished_tag_read_bumps_the_version(server, tmp_path):
     before = request(httpd, "/api/state")["tags_version"]
     session._tags_version += 1          # what the background reader does
     assert request(httpd, "/api/state")["tags_version"] == before + 1
+
+
+# -- upgraded while running ---------------------------------------------
+
+
+def test_a_process_older_than_the_installed_code_is_stale(monkeypatch):
+    monkeypatch.setattr(instance, "package_mtime", lambda: instance.PROCESS_START + 60)
+    assert instance.process_is_stale() is True
+    monkeypatch.setattr(instance, "package_mtime", lambda: instance.PROCESS_START - 60)
+    assert instance.process_is_stale() is False
+
+
+def test_a_running_instance_from_before_an_upgrade_is_stale(monkeypatch, tmp_path):
+    older = instance.Instance(
+        pid=os.getpid(), host="127.0.0.1", port=1, url="u", token="t", started=1000.0
+    )
+    monkeypatch.setattr(instance, "package_mtime", lambda: 2000.0)
+    assert instance.is_stale(older) is True
+    monkeypatch.setattr(instance, "package_mtime", lambda: 500.0)
+    assert instance.is_stale(older) is False
+
+
+def test_state_says_when_the_running_code_is_out_of_date(server, monkeypatch):
+    httpd, *_ = server
+    assert request(httpd, "/api/state")["stale"] is False
+    monkeypatch.setattr(instance, "package_mtime", lambda: instance.PROCESS_START + 60)
+    assert request(httpd, "/api/state")["stale"] is True
+
+
+def test_an_unexpected_error_answers_with_json_and_a_hint(server, monkeypatch):
+    """A dead socket tells the page nothing; an error with a hint does."""
+    httpd, session, *_ = server
+
+    def boom(self):
+        raise AttributeError("'Config' object has no attribute 'sort_desc'")
+
+    monkeypatch.setattr(type(session), "snapshot", boom)
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        request(httpd, "/api/state")
+    assert caught.value.code == 500
+    body = json.loads(caught.value.read())
+    assert "sort_desc" in body["error"]
+    assert "bgst ui --stop" in body["hint"]

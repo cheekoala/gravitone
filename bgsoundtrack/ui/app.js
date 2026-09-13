@@ -46,7 +46,10 @@
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const payload = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+    if (!res.ok) {
+      throw new Error(payload.hint ? `${payload.error} — ${payload.hint}` : payload.error
+        || `HTTP ${res.status}`);
+    }
     return payload;
   }
 
@@ -59,8 +62,9 @@
     toastTimer = setTimeout(() => { node.hidden = true; }, 3600);
   }
 
-  function offline(detail) {
+  function offline(detail, lead) {
     $("offline").hidden = false;
+    if (lead) $("offline-lead").textContent = lead;
     if (detail) $("offline-detail").textContent = detail;
   }
 
@@ -70,7 +74,12 @@
       if (next && next.config) render(next);
       return next;
     } catch (err) {
-      toast(err.message, true);
+      // The usual cause of an unknown setting is a page newer than the
+      // server that is serving it.
+      toast(/unknown setting/i.test(err.message)
+        ? `${err.message} — this page is newer than the bgst running it. `
+          + `Restart it: bgst ui --stop, then bgst ui.`
+        : err.message, true);
       return null;
     }
   }
@@ -192,6 +201,16 @@
     renderSources(next);
 
     if (!document.activeElement || document.activeElement.type !== "range") syncSettings(config);
+
+    if (next.stale) {
+      offline(
+        "The version still running is the old one, so this page and it no longer "
+        + "agree — restart it: bgst ui --stop, then bgst ui.",
+        "bgst was updated."
+      );
+    } else if (!$("offline").hidden && failures === 0) {
+      $("offline").hidden = true;
+    }
 
     const players = next.players.length ? next.players.join(", ") : "none found";
     let note = `Players available: ${players}. ` +
@@ -873,7 +892,7 @@
     try {
       render(await api("state"));
       failures = 0;
-      $("offline").hidden = true;
+      if (!state || !state.stale) $("offline").hidden = true;
     } catch (err) {
       $("now-kind").textContent = "Disconnected";
       if (!SERVED) {
@@ -882,7 +901,9 @@
         offline(
           /token/i.test(err.message)
             ? "This page's key is out of date — open the link bgst printed, or run 'bgst ui' again."
-            : `Cannot reach the bgst server (${err.message}). Is it still running?`
+            : `${err.message}. It may have stopped, or been updated while running — `
+              + `restart it: bgst ui --stop, then bgst ui.`,
+          /token/i.test(err.message) ? "That key is not valid." : "Lost the bgst server."
         );
       }
     }

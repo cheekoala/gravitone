@@ -18,10 +18,21 @@ from pathlib import Path
 
 from bgsoundtrack.config import config_path
 
+# When this process started. Anything installed after it is code we are not
+# running - see is_stale().
+PROCESS_START = time.time()
+
 
 def state_path(config_file: Path | None = None) -> Path:
+    """Where the running UI writes down where it is.
+
+    Named after the config it belongs to, so two configs living in one folder
+    do not adopt each other's server.
+    """
     base = config_file or config_path()
-    return base.parent / "ui.json"
+    if base.stem == "config":
+        return base.parent / "ui.json"
+    return base.parent / f"{base.stem}.ui.json"
 
 
 @dataclass(frozen=True)
@@ -78,6 +89,39 @@ def read(config_file: Path | None = None) -> Instance | None:
         )
     except (OSError, KeyError, ValueError, json.JSONDecodeError):
         return None
+
+
+def package_mtime() -> float:
+    """When the installed bgst was last written to.
+
+    Upgrading while the UI is running leaves a process serving the new page
+    from disk with the old Python in memory - which shows up as the browser
+    asking for settings the server has never heard of.
+    """
+    root = Path(__file__).parent
+    newest = 0.0
+    candidates = list(root.glob("*.py")) + list((root / "ui").glob("*"))
+    # pip stamps the dist-info directory at install time, which catches an
+    # upgrade even when the files inside kept their original timestamps.
+    for sibling in root.parent.glob("bgsoundtrack*.dist-info"):
+        candidates.append(sibling)
+        candidates.append(sibling / "RECORD")
+    for path in candidates:
+        try:
+            newest = max(newest, path.stat().st_mtime)
+        except OSError:
+            continue
+    return newest
+
+
+def process_is_stale() -> bool:
+    """True if bgst was updated on disk after this process started."""
+    return package_mtime() > PROCESS_START + 1
+
+
+def is_stale(instance: Instance) -> bool:
+    """True if that running instance predates the installed code."""
+    return bool(instance.started) and package_mtime() > instance.started + 1
 
 
 def alive(instance: Instance) -> bool:

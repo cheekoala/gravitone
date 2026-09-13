@@ -13,9 +13,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from bgsoundtrack import (
+    __version__,
     config as config_module,
     engine,
     library,
+    instance,
     picker,
     player,
     playlists,
@@ -80,6 +82,10 @@ class Session:
             "backend": self._backend.name if self._backend else None,
             "players": player.available(),
             "picker": self.picker_available,
+            "version": __version__,
+            # Updated underneath ourselves? Then this process is serving a
+            # newer page than the code it is running.
+            "stale": instance.process_is_stale(),
             "sort": self.config.sort_by,
             "sorts": list(library.SORTS),
             "tags_pending": self._tags_pending,

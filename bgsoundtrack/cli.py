@@ -353,6 +353,17 @@ def cmd_doctor(args) -> int:
 
     found = player.available()
     print(f"players found   {', '.join(found) if found else 'NONE'}")
+    import shutil
+
+    from bgsoundtrack import instance
+
+    probe = shutil.which("ffprobe")
+    print(f"tags & lengths  {'ffprobe' if probe else 'NO ffprobe - no titles or lengths'}")
+    if instance.process_is_stale():
+        print(
+            "update pending   bgst was installed again after this command's "
+            "version was loaded"
+        )
     chooser = picker.available()
     print(f"file chooser    {'yes' if chooser else 'no (Tk missing or no display)'}")
     if not chooser:

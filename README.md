@@ -400,6 +400,24 @@ desktop's volume mixer shows one **bgst** entry to ride rather than a new
 If `pactl` is missing (a pure-ALSA box, macOS, Windows), a volume change
 applies from the next track and the UI says so.
 
+## After an upgrade
+
+Reinstalling replaces the files on disk, but a UI that is **already running**
+keeps the old code in memory while serving the new page from disk — so the
+page asks for things the server has never heard of (`unknown setting
+'sort_desc'`), or columns come up empty. bgst now notices:
+
+- the page shows a banner saying it was updated and what to run;
+- `bgst ui` refuses to quietly hand you the stale one: in a terminal it offers
+  to restart it, and from a shortcut it says so in a dialog;
+- `bgst doctor` reports it too.
+
+The fix is always the same:
+
+```sh
+bgst ui --stop && bgst ui
+```
+
 ## When the shortcut seems to do nothing
 
 A desktop shortcut runs with no terminal, so anything printed is lost. bgst
@@ -411,6 +429,7 @@ whichever exists), including "running, but no browser opened — go to
 | --- | --- |
 | Port 8765 already taken | moves to the next free port, or says so with `--port` |
 | A UI already running | opens the browser at that one; `--stop` to end it |
+| Upgraded while running | banner in the page, offer to restart from the terminal |
 | `bgst: command not found` | `~/.local/bin` is not on PATH — see Install, or use the full path |
 | Started from the installer, terminal closed | now launched detached, survives it |
 

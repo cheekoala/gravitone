@@ -20,6 +20,7 @@ import signal
 import socket
 import sys
 import time
+import traceback
 import threading
 import webbrowser
 from http import HTTPStatus
@@ -178,6 +179,19 @@ class Handler(BaseHTTPRequestHandler):
             return
         except player.PlaybackError as exc:
             self._json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
+            return
+        except Exception as exc:  # noqa: BLE001 - an answer beats a dead socket
+            # Without this the connection just closes and the page shows
+            # "disconnected", which says nothing about what went wrong.
+            traceback.print_exc()
+            self._json(
+                {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "hint": "if bgst was updated while running, restart it: "
+                    "bgst ui --stop, then bgst ui",
+                },
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
             return
         if payload is None:
             self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
@@ -378,6 +392,30 @@ def run(
     if not new:
         existing = instance_state.running(config_path)
         if existing is not None:
+            stale = instance_state.is_stale(existing)
+            if stale:
+                # It is serving the new page off disk with the old code in
+                # memory, which surfaces as "unknown setting" in the browser.
+                print(
+                    "the bgst that is running started before the current version "
+                    "was installed",
+                    flush=True,
+                )
+                if sys.stdin.isatty():
+                    print(f"restart it? [Y/n] ", end="", flush=True)
+                    reply = sys.stdin.readline().strip().lower()
+                    if not reply.startswith("n"):
+                        instance_state.stop(existing)
+                        instance_state.clear(config_path)
+                        existing = None
+                else:
+                    notify.complain(
+                        "bgst was updated",
+                        "The bgst that is running is from the previous version. "
+                        "Restart it with:\n\n    bgst ui --stop\n    bgst ui",
+                    )
+
+        if not new and existing is not None:
             print(f"bgst ui is already running  {existing.url}", flush=True)
             if open_browser and not webbrowser.open(existing.url):
                 notify.complain(
