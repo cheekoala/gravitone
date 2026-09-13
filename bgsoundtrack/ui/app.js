@@ -88,13 +88,50 @@
       ? clock(config.gap_min)
       : `${clock(config.gap_min)}–${clock(config.gap_max)}`;
 
-  async function ban() {
-    const done = await call("ban", {});
+  // Ban is two steps: the button arms it, a confirm button drops down on its
+  // own layer. The ban button itself never moves, so nothing shifts under
+  // the cursor between the two clicks.
+  let armed = null;        // the track name the confirm would ban
+  let armedTimer = null;
+
+  function armBan() {
+    if (!state || !state.running || !state.now || state.now.kind === "silence") return;
+    armed = state.now.name;
+    $("ban-confirm-label").textContent = `Ban ${armed.length > 28 ? "this track" : armed}`;
+    $("ban-confirm").classList.add("open");
+    $("ban-confirm").removeAttribute("aria-hidden");
+    $("ban-confirm").tabIndex = 0;
+    $("ban").classList.add("armed");
+    clearTimeout(armedTimer);
+    armedTimer = setTimeout(disarmBan, 8000);   // forget about it if ignored
+  }
+
+  function disarmBan() {
+    armed = null;
+    clearTimeout(armedTimer);
+    $("ban-confirm").classList.remove("open");
+    $("ban-confirm").setAttribute("aria-hidden", "true");
+    $("ban-confirm").tabIndex = -1;
+    $("ban").classList.remove("armed");
+  }
+
+  async function confirmBan() {
+    const name = armed;
+    disarmBan();
+    if (!name) return;
+    // Name it explicitly: by now the track may have moved on, and banning
+    // whatever happens to be playing is not what was asked for.
+    const done = await call("ban", { name });
     if (!done) return;
     invalidate();
     toast(done.result.how === "unlinked"
       ? `Banned ${done.result.name} — unlinked and skipped`
       : `Banned ${done.result.name} — out of this playlist, file untouched`);
+  }
+
+  function toggleBan() {
+    if (armed) confirmBan();
+    else armBan();
   }
 
   // -- render ---------------------------------------------------------
@@ -107,6 +144,8 @@
     $("transport-label").textContent = running ? "Live" : "Play";
     $("skip").disabled = !running;
     $("ban").disabled = !running || !now || now.kind === "silence";
+    // The armed confirm belongs to one track; if that track is gone, so is it.
+    if (armed && (!now || now.name !== armed)) disarmBan();
 
     const nowPanel = $("panel-now");
     const inGap = !!now && now.kind !== "track";
@@ -261,7 +300,7 @@
 
     if (!data.tracks.length && !broken.length) {
       list.append(el("li", "empty", name === "music"
-        ? "No music yet — open Add, then link files or add a source folder."
+        ? "No music yet — open Add, then add a folder or link files."
         : "No ambience yet — rain, wind, room tone, a distant tavern."));
       return;
     }
@@ -273,8 +312,8 @@
       body.append(el("div", "t-name", track.name), el("div", "t-target", shortPath(track.target)));
       row.append(body);
       if (track.origin === "source") {
-        const tag = el("span", "tag source", "source");
-        tag.title = `From the source folder ${track.source}`;
+        const tag = el("span", "tag source", "folder");
+        tag.title = `From the folder ${track.source}`;
         row.append(tag);
       }
       const remove = el("button", "t-remove", "✕");
@@ -302,7 +341,7 @@
       ...next.sources.ambient.map((s) => ({ ...s, section: "ambient" })),
     ];
     if (!all.length) {
-      list.append(el("li", "empty", "No source folders — everything is linked."));
+      list.append(el("li", "empty", "No folders — this playlist is all links."));
       return;
     }
     all.forEach((source) => {
@@ -312,7 +351,7 @@
       const meta = el("span", "s-meta", source.exists ? `${source.count} audio` : "missing");
       const tag = el("span", `tag${source.section === "ambient" ? " source" : ""}`, source.section);
       const remove = el("button", "t-remove", "✕");
-      remove.title = `Stop playing ${source.path}`;
+      remove.title = `Take ${source.path} out of this playlist (the folder stays)`;
       remove.addEventListener("click", async () => {
         const done = await call("source", { path: source.path, section: source.section, remove: true });
         if (done) { invalidate(); toast(`Removed source ${source.path}`); }
@@ -438,7 +477,12 @@
 
     const list = $("browser");
     list.replaceChildren();
-    list.append(folderRow(`This folder → ${section}`, data.path, true));
+    const playlistName = state
+      ? (state.playlists.find((p) => p.id === state.playlist) || {}).name
+      : "";
+    list.append(
+      folderRow(`This folder → ${playlistName || "playlist"} · ${section}`, data.path, true)
+    );
 
     if (data.parent) {
       const up = el("li");
@@ -471,15 +515,15 @@
     if (showPath) body.append(el("div", "t-target", shortPath(path)));
     const buttons = el("div", "row-buttons");
 
-    const linkButton = el("button", "add", "Link all");
-    linkButton.title = "Symlink every audio file in here into the library";
+    const folderButton = el("button", "add", "Add folder");
+    folderButton.title = "Put this whole folder in the playlist, played where it stands";
+    folderButton.addEventListener("click", (event) => { event.stopPropagation(); addSource(path); });
+
+    const linkButton = el("button", "source-btn", "Link files");
+    linkButton.title = "Link the audio files that are in here now, one by one";
     linkButton.addEventListener("click", (event) => { event.stopPropagation(); link(path); });
 
-    const sourceButton = el("button", "source-btn", "Source");
-    sourceButton.title = "Play this folder in place, including anything added later";
-    sourceButton.addEventListener("click", (event) => { event.stopPropagation(); addSource(path); });
-
-    buttons.append(linkButton, sourceButton);
+    buttons.append(folderButton, linkButton);
     row.append(body, buttons);
     return row;
   }
@@ -498,7 +542,7 @@
     const next = await call("source", { path, section });
     if (!next) return;
     invalidate();
-    toast(`Playing ${section} from ${next.result}`);
+    toast(`${section === "ambient" ? "Ambience" : "Music"} now plays from ${next.result}`);
   }
 
   async function chooseFolder() {
@@ -511,7 +555,7 @@
         toast(`No system chooser here (${picked.reason || "no Tk"}) — browse below instead`, true);
       } else if (picked.paths.length) {
         await browse(picked.paths[0]);
-        toast("Folder opened — Link all, or Source to play it in place");
+        toast("Folder opened — Add folder to play all of it, or Link files");
       }
     } catch (err) {
       toast(err.message, true);
@@ -558,7 +602,11 @@
 
   $("transport").addEventListener("click", () => call("toggle", {}));
   $("skip").addEventListener("click", () => call("skip", {}));
-  $("ban").addEventListener("click", ban);
+  $("ban").addEventListener("click", toggleBan);
+  $("ban-confirm").addEventListener("click", confirmBan);
+  document.addEventListener("click", (event) => {
+    if (armed && !event.target.closest(".ban-wrap")) disarmBan();
+  });
   $("pick-folder").addEventListener("click", chooseFolder);
   $("path-form").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -636,7 +684,8 @@
     if (event.target.matches("input, textarea")) return;
     if (event.key === " ") { event.preventDefault(); call("toggle", {}); }
     if (event.key === "n") call("skip", {});
-    if (event.key === "b") ban();
+    if (event.key === "b") toggleBan();      // once to arm, again to confirm
+    if (event.key === "Escape") disarmBan();
   });
 
   // -- polling --------------------------------------------------------

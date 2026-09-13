@@ -121,21 +121,21 @@ def test_legacy_config_sources_become_the_library_playlist(env, tmp_path):
     assert store.current().sources("ambient") == []
 
 
-def test_cli_source_add_list_remove(env, tmp_path, capsys):
+def test_cli_folder_add_list_remove(env, tmp_path, capsys):
     album = tmp_path / "album"
     album.mkdir()
     (album / "a.mp3").write_bytes(b"\0")
 
-    assert main(["source", "add", str(album)]) == 0
+    assert main(["folder", "add", str(album)]) == 0
     assert _store().current().music_sources == [str(album.resolve())]
     assert main(["source", "add", "--ambient", str(album)]) == 0
     capsys.readouterr()
 
-    assert main(["source", "list"]) == 0
+    assert main(["source", "list"]) == 0   # the old name still works
     out = capsys.readouterr().out
-    assert "music sources (1)" in out and "ambient sources (1)" in out
+    assert "music folders (1)" in out and "ambient folders (1)" in out
 
-    assert main(["source", "remove", str(album)]) == 0
+    assert main(["folder", "remove", str(album)]) == 0   # the new name
     assert _store().current().music_sources == []
     assert (album / "a.mp3").exists()
 

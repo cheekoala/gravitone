@@ -181,7 +181,7 @@ def cmd_source(args) -> int:
         print(f"playlist: {playlist.name}\n")
         for name in ("music", "ambient"):
             folders = playlist.sources(name)
-            print(f"{name} sources ({len(folders)}):")
+            print(f"{name} folders ({len(folders)}):")
             for folder in folders:
                 mark = "" if folder.is_dir() else "  MISSING"
                 print(f"  {folder}  [{len(library.scan(folder))} audio]{mark}")
@@ -192,14 +192,14 @@ def cmd_source(args) -> int:
         if args.action == "add":
             added = library.add_source(config, Path(target), section=section, playlist=playlist)
             print(
-                f"added {section} source {added} to {playlist.name} "
+                f"{playlist.name} now plays {section} from {added} "
                 f"({len(library.scan(added))} audio files)"
             )
         else:
             removed = library.remove_source(
                 config, Path(target), section=section, playlist=playlist
             )
-            print(f"removed {section} source {removed} from {playlist.name}")
+            print(f"took the {section} folder {removed} out of {playlist.name}")
     store.save()
     return 0
 
@@ -283,7 +283,7 @@ def cmd_doctor(args) -> int:
     for section in library.SECTIONS:
         for folder in playlist.sources(section):
             state = "ok" if folder.is_dir() else "MISSING"
-            print(f"{section[:7]} source  {folder} [{state}]")
+            print(f"{section[:7]} folder  {folder} [{state}]")
     from bgsoundtrack import picker
 
     found = player.available()
@@ -377,18 +377,18 @@ def cmd_ui(args) -> int:
 def _pick_source(args) -> int:
     from bgsoundtrack import picker
 
-    config = _load_config(args)
     result = picker.pick("folder", "Choose a music folder for bgst")
     if not result.available:
         print(f"no system file chooser here ({result.reason})", file=sys.stderr)
-        print("use 'bgst source add PATH' instead", file=sys.stderr)
+        print("use 'bgst folder add PATH' instead", file=sys.stderr)
         return 1
     if not result.paths:
         print("nothing picked")
         return 0
-    added = library.add_source(config, Path(result.paths[0]))
-    config_module.save(config, Path(args.config).expanduser() if args.config else None)
-    print(f"added music source {added}")
+    config, store, playlist = _load(args)
+    added = library.add_source(config, Path(result.paths[0]), playlist=playlist)
+    store.save()
+    print(f"{playlist.name} now plays music from {added}")
     return 0
 
 
@@ -518,16 +518,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_playlist)
 
     p = sub.add_parser(
-        "source",
-        help="play whole folders in place (no symlinks, picked up as they change)",
+        "folder",
+        aliases=["source"],
+        help="put whole folders in a playlist, played where they stand",
     )
     source_actions = p.add_subparsers(dest="action", required=True)
-    for action, blurb in (("add", "start playing a folder"), ("remove", "stop playing it")):
+    for action, blurb in (
+        ("add", "play a folder as part of this playlist"),
+        ("remove", "take it back out"),
+    ):
         sp = source_actions.add_parser(action, help=blurb)
         sp.add_argument("paths", nargs="+", metavar="PATH")
-        sp.add_argument("--ambient", action="store_true", help="an ambience source")
+        sp.add_argument("--ambient", action="store_true", help="an ambience folder")
         sp.set_defaults(func=cmd_source)
-    sp = source_actions.add_parser("list", help="show the source folders")
+    sp = source_actions.add_parser("list", help="show this playlist's folders")
     sp.set_defaults(func=cmd_source)
 
     p = sub.add_parser("list", help="show the library")
@@ -550,7 +554,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--pick",
         action="store_true",
-        help="open the system folder chooser to add a source, then exit",
+        help="open the system folder chooser to add a music folder, then exit",
     )
     p.add_argument(
         "--port",

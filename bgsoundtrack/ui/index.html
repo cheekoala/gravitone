@@ -22,13 +22,18 @@
       <span class="brand-sub" id="root-path"></span>
     </div>
     <div class="topbar-actions">
-      <div class="skip-group" id="skip-group">
-        <button class="ghost" id="skip" title="Next track (N)" disabled>
-          <svg viewBox="0 0 24 24" class="icon"><path d="M6 5l9 7-9 7V5z"/><rect x="16" y="5" width="2.4" height="14" rx="1"/></svg>
-        </button>
+      <button class="ghost" id="skip" title="Next track (N)" disabled>
+        <svg viewBox="0 0 24 24" class="icon"><path d="M6 5l9 7-9 7V5z"/><rect x="16" y="5" width="2.4" height="14" rx="1"/></svg>
+      </button>
+      <div class="ban-wrap">
         <button class="ghost ban" id="ban" title="Ban: skip and remove from this playlist (B)" disabled>
           <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="8.4"/><path d="M6.2 6.2l11.6 11.6"/></svg>
           <span>Ban</span>
+        </button>
+        <!-- Floats down on its own layer; the button above never moves. -->
+        <button class="confirm-ban" id="ban-confirm" tabindex="-1" aria-hidden="true">
+          <svg viewBox="0 0 24 24" class="icon"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+          <span id="ban-confirm-label">Confirm</span>
         </button>
       </div>
       <button class="live" id="transport" data-on="false">
@@ -127,8 +132,10 @@
           </div>
         </div>
         <p class="hint">
-          <strong>Link</strong> copies nothing — it drops a symlink in your library, track by track.
-          <strong>Source</strong> plays a whole folder where it stands and picks up anything you add to it later.
+          <strong>Add folder</strong> puts a whole folder in this playlist, played where it
+          stands — anything you drop in there later joins by itself.
+          <strong>Link files</strong> instead picks up the files that are there now, as
+          symlinks. Either way nothing is copied.
         </p>
         <div class="add-tools">
           <button class="ghost small" id="pick-folder">
@@ -139,7 +146,7 @@
             <input type="text" id="path-input" placeholder="…or paste a path" spellcheck="false" autocomplete="off">
             <button class="ghost small" type="submit">Go</button>
           </form>
-          <button class="ghost small" id="new-from-folder">New playlist from this folder</button>
+          <button class="ghost small" id="new-from-folder">New playlist from this folder…</button>
         </div>
         <form class="path-form" id="folder-playlist-form" hidden>
           <input type="text" id="folder-playlist-name" placeholder="Playlist name" autocomplete="off">
@@ -188,8 +195,8 @@
           <ul class="sources" id="removed-list"></ul>
         </div>
         <div class="card">
-          <div class="kicker">Source folders</div>
-          <p class="hint">Played in place, nothing linked. New files in these folders join the rotation by themselves.</p>
+          <div class="kicker">Folders in this playlist</div>
+          <p class="hint">Played where they stand, nothing linked or copied. New files in them join the rotation by themselves.</p>
           <ul class="sources" id="sources-list"></ul>
           <div class="row-actions">
             <button class="ghost small" data-goto="add">Add a folder</button>

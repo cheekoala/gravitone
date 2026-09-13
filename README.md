@@ -8,14 +8,15 @@ whatever game you're in — with a random gap after each song that is either
 silence or a bed of ambience (wind, rain, tavern noise, crickets).
 
 - **Playlists.** Two folders you switch between — one per game, per mood, per
-  session. Each keeps its own links, its own source folders, and remembers
-  which tracks you took out of it. Switching lands on the next track.
+  session. Each keeps its own links, its own folders, and remembers which
+  tracks you took out of it. Switching lands on the next track.
 - **Two ways in, mixed freely.** *Link* a file and a symlink lands in your
   `custom soundtrack` folder, pointing at where it already lives — a 40 GB
   collection costs a few KB of directory entries. Or set a whole folder as a
-  **source** and it plays in place, picking up whatever you drop in later.
+  **folder** to a playlist and it plays in place, picking up whatever you drop
+  in later.
   Nothing is ever copied.
-- **A separate `ambient` folder and ambient sources** for loops and atmosphere.
+- **A separate `ambient` folder and ambient folders** for loops and atmosphere.
 - **Random gaps with sane defaults** — 12–45 s, 65 % of them ambient, the rest
   silence — tunable anywhere from none to a full hour, and hideable if you
   would rather not know how long the quiet lasts.
@@ -24,7 +25,7 @@ silence or a bed of ambience (wind, rain, tavern noise, crickets).
 - **No Python dependencies.** Playback goes through `ffplay`, `mpv`, `afplay`
   or `vlc`, whichever you have.
 
-![The bgst control panel: ambience playing in hidden mode, with the ban button open](docs/ui-now.png)
+![The bgst control panel, with Ban armed and its confirm dropped below](docs/ui-now.png)
 
 ## Install
 
@@ -104,7 +105,7 @@ Or from the terminal:
 bgst init                                    # create the custom soundtrack folder
 bgst playlist new "Hollow Kingdom" --source ~/Music/Nier --use
 bgst playlist new "Field Work" --source ~/Sounds/recordings
-bgst source add --ambient ~/Sounds/weather   # into the selected playlist
+bgst folder add --ambient ~/Sounds/weather   # into the selected playlist
 bgst link ~/Music/Outer\ Wilds               # or link track by track
 bgst play
 ```
@@ -127,8 +128,8 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 
 | | |
 | --- | --- |
-| ![The music library, mixing linked tracks with one from a source folder](docs/ui-library.png) | ![Settings, including source folders](docs/ui-settings.png) |
-| ![Adding files: link them, or play a folder in place](docs/ui-add.png) | |
+| ![The music library, mixing linked tracks with one from a folder](docs/ui-library.png) | ![Settings, with playlists and folders](docs/ui-settings.png) |
+| ![Adding: a whole folder, or just the files in it](docs/ui-add.png) | |
 
 - **Top bar** — the playlist selector; switching it switches what plays.
 - **Now** — what is playing or how long the current gap runs, with history.
@@ -137,10 +138,11 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
   Tk; `bgst doctor` says whether you have it). Otherwise browse from the
   built-in file browser or paste a path — a web file picker hands over file
   *contents*, never paths, and paths are what linking needs. Every folder row
-  offers both **Link all** (symlinks each file) and **Source** (play the
-  folder in place).
+  offers **Add folder** (the whole folder joins this playlist, live) and
+  **Link files** (just the files in it now, as symlinks), plus *New playlist
+  from this folder…*.
 - **Config** — gaps, levels, shuffle, loop, your playlists (rename, delete,
-  create) and this playlist's source folders and removed tracks. Changes save
+  create) and this playlist's folders and removed tracks. Changes save
   immediately and take effect from the next gap; no need to restart playback.
 
 Keys: `space` play/stop, `n` next, `b` ban. Every API call needs the token in the URL,
@@ -168,7 +170,7 @@ bgst playlist use "Night Drive"
 
 Or pick them from the selector in the top bar of the UI. A playlist owns:
 
-- its **source folders**, played in place;
+- its **folders**, played in place;
 - its own **links**, in `custom soundtrack/playlists/<id>/`;
 - its **removals** — take a track out with `✕` (or `bgst unlink NAME`) and it
   stays out of *this* playlist, remembered across restarts. The same file
@@ -184,7 +186,7 @@ the next full pass — as does linking, removing, or adding a source.
 
 The playlist called **Library** is the plain `custom soundtrack/music` and
 `/ambient` folders, so an install from before playlists keeps working exactly
-as it did, source folders and all.
+as it did, folders and all.
 
 Playlists live in `~/.config/bgsoundtrack/playlists.json` — plain JSON, easy
 to read, back up, or edit by hand.
@@ -196,21 +198,23 @@ custom soundtrack/
 ├── music/      symlinks -> your songs, wherever they live
 └── ambient/    symlinks -> your ambience
 
-plus any source folders, played where they stand
+plus any folders you added, played where they stand
 ```
 
 **Linked** files are curated one by one and stay put even if you reorganise
-the original folder later. **Source folders** are the low-effort option: point
+the original folder later. **Folders** are the low-effort option: point a playlist
 at `~/Music/Soundtracks`, and every audio file under it plays, including
 whatever you add next week. A file reachable both ways is only played once.
 
 ```sh
-bgst source add ~/Music/Soundtracks      # music source
-bgst source add --ambient ~/Sounds       # ambience source
-bgst source list                         # with per-folder track counts
-bgst source remove ~/Music/Soundtracks   # the folder itself is untouched
-bgst ui --pick                           # pick a music source from a dialog
+bgst folder add ~/Music/Soundtracks      # a music folder for this playlist
+bgst folder add --ambient ~/Sounds       # an ambience folder
+bgst folder list                         # with per-folder track counts
+bgst folder remove ~/Music/Soundtracks   # the folder itself is untouched
+bgst ui --pick                           # pick one from a system dialog
 ```
+
+(`bgst source …` still works — same command, older name.)
 
 Because entries are plain symlinks, you can also manage the folder by hand —
 drag links in with your file manager, rename them to change sort order, delete
@@ -221,7 +225,7 @@ one to drop a track. The player ignores non-audio files and dangling links.
 | `bgst ui` | open the control panel (`--host 0.0.0.0` for a phone remote) |
 | `bgst play` | play in the terminal (`n` next, `q` quit) |
 | `bgst link PATH...` | symlink files/folders in (`--ambient`, `--no-recursive`, `--relative`) |
-| `bgst source add\|remove\|list` | play whole folders in place (`--ambient`) |
+| `bgst folder add\|remove\|list` | put whole folders in this playlist (`--ambient`) |
 | `bgst playlist list\|new\|use\|rename\|remove` | switch between sets of music |
 | `bgst playlist removed\|restore` | see and undo removals in this playlist |
 | `bgst play --hidden` | play without ever showing gap lengths |
@@ -242,13 +246,22 @@ cannot cross drives.
 
 ## Ban
 
-`Ban` grows out of the skip button (and answers to `b`): it skips the track
-*and* takes it out of the current playlist, in one press — the same removal
-the `✕` does, so a source track is only remembered as gone and the file is
-never touched. Undo it in Config → *Removed from this playlist*.
+**Ban** sits beside skip and never moves. Press it (or `b`) and a confirm
+button drops down *on its own layer* naming the track — the buttons
+underneath stay exactly where they were, so the thing under your cursor is
+still the thing you were aiming at. Press the confirm (or `b` again) to go
+through with it; click anywhere else, press `Escape`, or wait eight seconds
+and it forgets.
 
-Ban during ambience bans the ambient track instead. During silence there is
-nothing to ban.
+Confirming skips the track *and* takes it out of the current playlist — the
+same removal the `✕` does, so a track from a folder is only remembered as
+gone and the file is never touched. Undo it in Config → *Removed from this
+playlist*.
+
+The confirmation names the track it armed on, and the server checks that name
+before acting: if the music moved on while the confirm was sitting there,
+nothing is banned. Ban during ambience bans the ambient track instead; during
+silence there is nothing to ban.
 
 ## Gaps between songs
 

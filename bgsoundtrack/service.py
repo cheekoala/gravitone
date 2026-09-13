@@ -301,11 +301,20 @@ class Session:
         self.store.touch()
         return str(path)
 
-    def ban(self) -> dict:
-        """Skip this track and take it out of the playlist, in one go."""
+    def ban(self, expected: str | None = None) -> dict:
+        """Skip this track and take it out of the playlist, in one go.
+
+        `expected` is the track the caller meant: a confirmation can arrive
+        after the music has moved on, and banning whatever happens to be
+        playing by then is not what anyone asked for.
+        """
         now = self._now
         if now is None or not now.path:
             raise library.LibraryError("nothing is playing")
+        if expected and expected != now.name:
+            raise library.LibraryError(
+                f"{expected} is no longer playing - nothing was banned"
+            )
         section = "ambient" if now.kind == "ambient" else "music"
         result = self.remove_track(Path(now.path).name, section)
         self.skip()

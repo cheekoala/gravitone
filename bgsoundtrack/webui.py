@@ -203,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "skip":
             session.skip()
         elif route == "ban":
-            result = session.ban()
+            result = session.ban(body.get("name"))
             return {**session.snapshot(), "result": result}
         elif route == "config":
             live = session.update_config(body)
