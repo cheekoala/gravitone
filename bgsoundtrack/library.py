@@ -18,7 +18,7 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from bgsoundtrack import playlists
+from bgsoundtrack import playlists, tags
 from bgsoundtrack.config import AUDIO_EXTENSIONS, MUSIC_DIRNAME, AMBIENT_DIRNAME, Config
 from bgsoundtrack.playlists import Playlist
 
@@ -288,8 +288,30 @@ def linked_entries(
     return found
 
 
+SORTS = ("name", "title", "artist", "album")
+
+
+def sort_entries(found: list[Entry], sort: str = "name", reader=None) -> list[Entry]:
+    """Order a track list by filename, title, artist or album.
+
+    Tags are only read from the cache here (never probed), so a listing stays
+    instant; whatever is not cached yet falls back to what the path says.
+    """
+    if sort not in SORTS or sort == "name":
+        return sorted(found, key=lambda entry: entry.name.lower())
+    reader = reader or tags.Reader()
+    return sorted(
+        found,
+        key=lambda entry: reader.known(entry.target).key(sort) + (entry.name.lower(),),
+    )
+
+
 def entries(
-    config: Config, section: str = "music", playlist: Playlist | None = None
+    config: Config,
+    section: str = "music",
+    playlist: Playlist | None = None,
+    sort: str | None = None,
+    reader=None,
 ) -> list[Entry]:
     """Everything playable in a section: links first, then source folders.
 
@@ -322,14 +344,17 @@ def entries(
             if playlist.is_excluded(path):
                 continue
             found.append(Entry(path=path, target=path, origin="source", source=source))
-    return found
+    return sort_entries(found, sort or config.sort_by, reader)
 
 
 def tracks(
-    config: Config, section: str = "music", playlist: Playlist | None = None
+    config: Config,
+    section: str = "music",
+    playlist: Playlist | None = None,
+    sort: str | None = None,
 ) -> list[Path]:
-    """Playable files of a section, links and source folders together."""
-    return [entry.path for entry in entries(config, section, playlist)]
+    """Playable files of a section, links and folders together."""
+    return [entry.path for entry in entries(config, section, playlist, sort)]
 
 
 def remove_track(

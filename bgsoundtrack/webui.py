@@ -35,6 +35,7 @@ from bgsoundtrack import (
     notify,
     player,
     playlists,
+    transfer,
 )
 from bgsoundtrack.service import Session
 
@@ -166,6 +167,9 @@ class Handler(BaseHTTPRequestHandler):
         except KeyError as exc:
             self._json({"error": f"unknown setting {exc}"}, HTTPStatus.BAD_REQUEST)
             return
+        except transfer.TransferError as exc:
+            self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
         except library.LibraryError as exc:
             self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return
@@ -203,7 +207,7 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "skip":
             session.skip()
         elif route == "ban":
-            result = session.ban()
+            result = session.ban(body.get("name"))
             return {**session.snapshot(), "result": result}
         elif route == "config":
             live = session.update_config(body)
@@ -256,11 +260,26 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 result = session.add_source(path, section)
             return {**session.snapshot(), "result": result}
+        elif route == "export":
+            path = body.get("path")
+            if not path:
+                raise ValueError("export needs a path")
+            result = session.export(
+                path, body.get("kind", "json"), body.get("only") or None
+            )
+            return {**session.snapshot(), "result": result}
+        elif route == "import":
+            path = body.get("path")
+            if not path:
+                raise ValueError("import needs a path")
+            result = session.import_file(path, body.get("name"))
+            return {**session.snapshot(), "result": result}
         elif route == "pick":
             # Blocks until the person at the machine answers the dialog.
             picked = session.pick(
                 body.get("kind", "folder"),
                 body.get("title", "Choose a folder for bgst"),
+                body.get("suggested", ""),
             )
             return {
                 "paths": picked.paths,

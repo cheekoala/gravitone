@@ -28,8 +28,12 @@ except tkinter.TclError:
     pass
 
 kind, title = sys.argv[1], sys.argv[2]
+suggested = sys.argv[3] if len(sys.argv) > 3 else ""
 if kind == "folder":
     picked = dialog.askdirectory(title=title, mustexist=True)
+    paths = [picked] if picked else []
+elif kind == "save":
+    picked = dialog.asksaveasfilename(title=title, initialfile=suggested)
     paths = [picked] if picked else []
 else:
     paths = list(dialog.askopenfilenames(title=title))
@@ -61,13 +65,18 @@ def available() -> bool:
     return probe.returncode == 0
 
 
-def pick(kind: str = "folder", title: str = "Choose a folder", timeout: float = 600) -> PickResult:
+def pick(
+    kind: str = "folder",
+    title: str = "Choose a folder",
+    timeout: float = 600,
+    suggested: str = "",
+) -> PickResult:
     """Show the chooser and wait for the person at that machine."""
-    if kind not in ("folder", "files"):
+    if kind not in ("folder", "files", "save"):
         raise ValueError(f"unknown picker kind: {kind}")
     try:
         done = subprocess.run(
-            [sys.executable, "-c", _SCRIPT, kind, title],
+            [sys.executable, "-c", _SCRIPT, kind, title, suggested],
             capture_output=True,
             text=True,
             timeout=timeout,

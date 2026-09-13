@@ -239,3 +239,39 @@ def test_the_mixer_is_a_no_op_without_pactl(monkeypatch):
     monkeypatch.setattr(mixer.shutil, "which", lambda name: None)
     assert mixer.available() is False
     assert mixer.set_volume(1, 50) is False
+
+
+# -- ban asks before it bites ------------------------------------------
+
+
+def test_ban_refuses_when_the_track_has_moved_on(session, tmp_path, monkeypatch):
+    """A confirmation can arrive late; it must not ban whatever is on now."""
+    album = tmp_path / "album"
+    album.mkdir()
+    for name in ("first.mp3", "second.mp3"):
+        (album / name).write_bytes(b"\0")
+    library.add_source(session.config, album, playlist=session.playlist)
+    library.invalidate_cache()
+    monkeypatch.setattr(session, "skip", lambda: None)
+
+    session._on_event(engine.Event("track", path=album / "first.mp3"))
+    session._on_event(engine.Event("track", path=album / "second.mp3"))  # moved on
+
+    with pytest.raises(library.LibraryError, match="no longer playing"):
+        session.ban("first.mp3")
+    assert session.playlist.excluded == []
+
+    result = session.ban("second.mp3")     # naming what is actually playing
+    assert result["name"] == "second.mp3"
+
+
+def test_ban_without_a_name_still_takes_what_is_playing(session, tmp_path, monkeypatch):
+    album = tmp_path / "album"
+    album.mkdir()
+    (album / "only.mp3").write_bytes(b"\0")
+    library.add_source(session.config, album, playlist=session.playlist)
+    library.invalidate_cache()
+    monkeypatch.setattr(session, "skip", lambda: None)
+
+    session._on_event(engine.Event("track", path=album / "only.mp3"))
+    assert session.ban()["name"] == "only.mp3"

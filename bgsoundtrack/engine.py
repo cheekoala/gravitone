@@ -164,7 +164,7 @@ class Engine:
                 if not music:
                     raise RuntimeError(
                         f"nothing to play in {playlist.name} - add music with "
-                        f"'bgst link <path>' or 'bgst source add <folder>'"
+                        f"'bgst folder add <folder>' or 'bgst link <path>'"
                     )
 
             if not queue:

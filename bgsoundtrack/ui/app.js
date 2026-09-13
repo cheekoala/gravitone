@@ -88,13 +88,50 @@
       ? clock(config.gap_min)
       : `${clock(config.gap_min)}–${clock(config.gap_max)}`;
 
-  async function ban() {
-    const done = await call("ban", {});
+  // Ban is two steps: the button arms it, a confirm button drops down on its
+  // own layer. The ban button itself never moves, so nothing shifts under
+  // the cursor between the two clicks.
+  let armed = null;        // the track name the confirm would ban
+  let armedTimer = null;
+
+  function armBan() {
+    if (!state || !state.running || !state.now || state.now.kind === "silence") return;
+    armed = state.now.name;
+    $("ban-confirm-label").textContent = `Ban ${armed.length > 28 ? "this track" : armed}`;
+    $("ban-confirm").classList.add("open");
+    $("ban-confirm").removeAttribute("aria-hidden");
+    $("ban-confirm").tabIndex = 0;
+    $("ban").classList.add("armed");
+    clearTimeout(armedTimer);
+    armedTimer = setTimeout(disarmBan, 8000);   // forget about it if ignored
+  }
+
+  function disarmBan() {
+    armed = null;
+    clearTimeout(armedTimer);
+    $("ban-confirm").classList.remove("open");
+    $("ban-confirm").setAttribute("aria-hidden", "true");
+    $("ban-confirm").tabIndex = -1;
+    $("ban").classList.remove("armed");
+  }
+
+  async function confirmBan() {
+    const name = armed;
+    disarmBan();
+    if (!name) return;
+    // Name it explicitly: by now the track may have moved on, and banning
+    // whatever happens to be playing is not what was asked for.
+    const done = await call("ban", { name });
     if (!done) return;
     invalidate();
     toast(done.result.how === "unlinked"
       ? `Banned ${done.result.name} — unlinked and skipped`
       : `Banned ${done.result.name} — out of this playlist, file untouched`);
+  }
+
+  function toggleBan() {
+    if (armed) confirmBan();
+    else armBan();
   }
 
   // -- render ---------------------------------------------------------
@@ -107,6 +144,8 @@
     $("transport-label").textContent = running ? "Live" : "Play";
     $("skip").disabled = !running;
     $("ban").disabled = !running || !now || now.kind === "silence";
+    // The armed confirm belongs to one track; if that track is gone, so is it.
+    if (armed && (!now || now.name !== armed)) disarmBan();
 
     const nowPanel = $("panel-now");
     const inGap = !!now && now.kind !== "track";
@@ -135,6 +174,7 @@
     if (!seen.length) history.append(el("li", "empty", "Nothing yet"));
     seen.forEach((name) => history.append(el("li", null, name)));
 
+    renderSortPickers(next);
     renderPlaylistPicker(next);
     renderPlaylists(next);
     renderRemoved(next);
@@ -172,6 +212,37 @@
     if (document.activeElement !== picker) picker.value = next.playlist;
   }
 
+  const SORT_LABELS = {
+    name: "File name",
+    title: "Title",
+    artist: "Artist",
+    album: "Album",
+  };
+
+  function renderSortPickers(next) {
+    document.querySelectorAll("select.sort").forEach((picker) => {
+      if (!picker.options.length) {
+        next.sorts.forEach((value) => {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = SORT_LABELS[value] || value;
+          picker.append(option);
+        });
+      }
+      if (document.activeElement !== picker) picker.value = next.sort;
+    });
+    ["music", "ambient"].forEach((name) => {
+      const note = $(`${name}-tags`);
+      // Tags are read in the background; say so rather than sorting silently
+      // by a guess taken from the path.
+      note.hidden = !next.tags_pending || next.sort === "name";
+      if (!note.hidden) {
+        note.textContent = `Reading tags — ${next.tags_pending} to go. `
+          + `Until then these are ordered by what the folder names say.`;
+      }
+    });
+  }
+
   function renderPlaylists(next) {
     const list = $("playlists-list");
     if (list.querySelector("input.rename")) return;   // mid-rename, leave it alone
@@ -182,7 +253,7 @@
       name.title = item.active ? "Playing from this one" : "Switch to this playlist";
       name.addEventListener("click", () => selectPlaylist(item.id));
       const meta = el("span", "s-meta",
-        `${item.sources} source${item.sources === 1 ? "" : "s"}` +
+        `${item.sources} folder${item.sources === 1 ? "" : "s"}` +
         (item.removed ? `, ${item.removed} removed` : ""));
 
       const rename = el("button", "s-edit", "✎");
@@ -261,7 +332,7 @@
 
     if (!data.tracks.length && !broken.length) {
       list.append(el("li", "empty", name === "music"
-        ? "No music yet — open Add, then link files or add a source folder."
+        ? "No music yet — open Add, then add a folder or link files."
         : "No ambience yet — rain, wind, room tone, a distant tavern."));
       return;
     }
@@ -270,11 +341,15 @@
     data.tracks.forEach((track) => {
       const row = el("li", track.name === playing && state.running ? "playing" : null);
       const body = el("div", "t-body");
-      body.append(el("div", "t-name", track.name), el("div", "t-target", shortPath(track.target)));
+      const meta = [track.artist, track.album].filter(Boolean).join(" — ");
+      body.append(
+        el("div", "t-name", track.title && state.sort !== "name" ? track.title : track.name),
+        el("div", "t-target", meta && state.sort !== "name" ? meta : shortPath(track.target))
+      );
       row.append(body);
       if (track.origin === "source") {
-        const tag = el("span", "tag source", "source");
-        tag.title = `From the source folder ${track.source}`;
+        const tag = el("span", "tag source", "folder");
+        tag.title = `From the folder ${track.source}`;
         row.append(tag);
       }
       const remove = el("button", "t-remove", "✕");
@@ -302,7 +377,7 @@
       ...next.sources.ambient.map((s) => ({ ...s, section: "ambient" })),
     ];
     if (!all.length) {
-      list.append(el("li", "empty", "No source folders — everything is linked."));
+      list.append(el("li", "empty", "No folders — this playlist is all links."));
       return;
     }
     all.forEach((source) => {
@@ -312,7 +387,7 @@
       const meta = el("span", "s-meta", source.exists ? `${source.count} audio` : "missing");
       const tag = el("span", `tag${source.section === "ambient" ? " source" : ""}`, source.section);
       const remove = el("button", "t-remove", "✕");
-      remove.title = `Stop playing ${source.path}`;
+      remove.title = `Take ${source.path} out of this playlist (the folder stays)`;
       remove.addEventListener("click", async () => {
         const done = await call("source", { path: source.path, section: source.section, remove: true });
         if (done) { invalidate(); toast(`Removed source ${source.path}`); }
@@ -438,7 +513,12 @@
 
     const list = $("browser");
     list.replaceChildren();
-    list.append(folderRow(`This folder → ${section}`, data.path, true));
+    const playlistName = state
+      ? (state.playlists.find((p) => p.id === state.playlist) || {}).name
+      : "";
+    list.append(
+      folderRow(`This folder → ${playlistName || "playlist"} · ${section}`, data.path, true)
+    );
 
     if (data.parent) {
       const up = el("li");
@@ -471,15 +551,15 @@
     if (showPath) body.append(el("div", "t-target", shortPath(path)));
     const buttons = el("div", "row-buttons");
 
-    const linkButton = el("button", "add", "Link all");
-    linkButton.title = "Symlink every audio file in here into the library";
+    const folderButton = el("button", "add", "Add folder");
+    folderButton.title = "Put this whole folder in the playlist, played where it stands";
+    folderButton.addEventListener("click", (event) => { event.stopPropagation(); addSource(path); });
+
+    const linkButton = el("button", "source-btn", "Link files");
+    linkButton.title = "Link the audio files that are in here now, one by one";
     linkButton.addEventListener("click", (event) => { event.stopPropagation(); link(path); });
 
-    const sourceButton = el("button", "source-btn", "Source");
-    sourceButton.title = "Play this folder in place, including anything added later";
-    sourceButton.addEventListener("click", (event) => { event.stopPropagation(); addSource(path); });
-
-    buttons.append(linkButton, sourceButton);
+    buttons.append(folderButton, linkButton);
     row.append(body, buttons);
     return row;
   }
@@ -498,7 +578,7 @@
     const next = await call("source", { path, section });
     if (!next) return;
     invalidate();
-    toast(`Playing ${section} from ${next.result}`);
+    toast(`${section === "ambient" ? "Ambience" : "Music"} now plays from ${next.result}`);
   }
 
   async function chooseFolder() {
@@ -511,7 +591,7 @@
         toast(`No system chooser here (${picked.reason || "no Tk"}) — browse below instead`, true);
       } else if (picked.paths.length) {
         await browse(picked.paths[0]);
-        toast("Folder opened — Link all, or Source to play it in place");
+        toast("Folder opened — Add folder to play all of it, or Link files");
       }
     } catch (err) {
       toast(err.message, true);
@@ -529,6 +609,97 @@
     toast(source ? `Playing from ${name}` : `Created ${name}`);
     return done.result;
   }
+
+  // -- export & import --------------------------------------------------
+  const EXPORT_NAMES = { json: "bgst-library.json", csv: "bgst-library.csv", bundle: "bgst-bundle.zip" };
+
+  function transferNote(text, bad) {
+    const note = $("transfer-note");
+    note.hidden = !text;
+    note.textContent = text || "";
+    note.style.color = bad ? "#ff9ea1" : "";
+  }
+
+  async function askForPath(kind, title, suggested) {
+    // The desktop dialog when there is one; otherwise the little path box.
+    if (state && state.picker) {
+      transferNote("Waiting for the file dialog on the machine running bgst…");
+      const picked = await api("pick", { kind, title, suggested }).catch(() => null);
+      transferNote("");
+      if (picked && picked.available) return picked.paths[0] || null;
+    }
+    return undefined;   // caller falls back to the inline form
+  }
+
+  let pendingTransfer = null;
+
+  function askInline(label, placeholder, done) {
+    pendingTransfer = done;
+    const form = $("transfer-form");
+    form.hidden = false;
+    $("transfer-go").textContent = label;
+    $("transfer-path").placeholder = placeholder;
+    $("transfer-path").focus();
+  }
+
+  const kindOf = (path) => (/\.zip$/i.test(path || "") ? "bundle" : "manifest");
+
+  async function doExport(kind, path) {
+    transferNote(kind === "bundle" ? "Packing the audio…" : "Working…");
+    const next = await call("export", { path, kind });
+    if (!next) { transferNote("", true); return; }
+    const { tracks, total, bytes, skipped, path: written } = next.result;
+    const size = bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
+    const counted = kindOf(written) === "bundle"
+      ? `${tracks} track(s) packed`
+      : `${total} track(s) listed`;
+    transferNote(`Wrote ${written} — ${counted}, ${size}`
+      + (skipped.length ? `, ${skipped.length} skipped` : ""));
+    toast(`Exported to ${written}`);
+  }
+
+  async function doImport(path) {
+    transferNote("Working…");
+    const next = await call("import", { path });
+    if (!next) { transferNote("", true); return; }
+    invalidate();
+    const { playlists: added, tracks, skipped } = next.result;
+    transferNote(`Added ${added.join(", ")} — ${tracks} track(s)`
+      + (skipped.length ? `, ${skipped.length} not found here` : ""));
+    toast(`Imported ${added.join(", ")}`);
+  }
+
+  document.querySelectorAll("[data-export]").forEach((button) =>
+    button.addEventListener("click", async () => {
+      const kind = button.dataset.export;
+      const suggested = EXPORT_NAMES[kind];
+      const picked = await askForPath("save", `Export ${kind === "bundle" ? "bundle" : "manifest"}`, suggested);
+      if (picked === undefined) {
+        askInline("Export", `where to write ${suggested}`, (path) => doExport(kind, path));
+        return;
+      }
+      if (picked) doExport(kind, picked);
+    }));
+
+  $("import-file").addEventListener("click", async () => {
+    const picked = await askForPath("files", "Choose a bgst export to import", "");
+    if (picked === undefined) {
+      askInline("Import", "path to a .json or .zip export", doImport);
+      return;
+    }
+    if (picked) doImport(picked);
+  });
+
+  $("transfer-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = $("transfer-path").value.trim();
+    if (!value || !pendingTransfer) return;
+    $("transfer-form").hidden = true;
+    $("transfer-path").value = "";
+    const run = pendingTransfer;
+    pendingTransfer = null;
+    run(value);
+  });
 
   // -- wiring ---------------------------------------------------------
   function showPanel(name) {
@@ -558,7 +729,11 @@
 
   $("transport").addEventListener("click", () => call("toggle", {}));
   $("skip").addEventListener("click", () => call("skip", {}));
-  $("ban").addEventListener("click", ban);
+  $("ban").addEventListener("click", toggleBan);
+  $("ban-confirm").addEventListener("click", confirmBan);
+  document.addEventListener("click", (event) => {
+    if (armed && !event.target.closest(".ban-wrap")) disarmBan();
+  });
   $("pick-folder").addEventListener("click", chooseFolder);
   $("path-form").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -566,6 +741,11 @@
     if (value) browse(value);
   });
   $("playlist-select").addEventListener("change", (event) => selectPlaylist(event.target.value));
+  document.querySelectorAll("select.sort").forEach((picker) =>
+    picker.addEventListener("change", async () => {
+      const done = await call("config", { sort_by: picker.value });
+      if (done) { libraries.music = null; libraries.ambient = null; loadLibrary(panel); }
+    }));
   $("new-playlist-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const value = $("new-playlist-name").value.trim();
@@ -636,7 +816,8 @@
     if (event.target.matches("input, textarea")) return;
     if (event.key === " ") { event.preventDefault(); call("toggle", {}); }
     if (event.key === "n") call("skip", {});
-    if (event.key === "b") ban();
+    if (event.key === "b") toggleBan();      // once to arm, again to confirm
+    if (event.key === "Escape") disarmBan();
   });
 
   // -- polling --------------------------------------------------------
