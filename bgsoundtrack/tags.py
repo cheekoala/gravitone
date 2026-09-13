@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -143,6 +144,10 @@ class Reader:
         self._lock = threading.Lock()
         self._entries: dict = {}
         self._dirty = False
+        # A listing asks for the same file twice (sorting, then the row), and
+        # each ask stat()s it. Hold the answer for a moment.
+        self._memo: dict = {}
+        self._memo_at = 0.0
         self._load()
 
     # -- cache ----------------------------------------------------------
@@ -196,6 +201,7 @@ class Reader:
         )
 
     def store(self, path: Path, tags: Tags) -> None:
+        self._memo.pop(str(path), None)
         stamp = self._stamp(path)
         if stamp is None:
             return
@@ -220,9 +226,21 @@ class Reader:
         self.store(path, tags)
         return tags
 
-    def known(self, path: Path) -> Tags:
+    def known(self, path: Path, ttl: float = 2.0) -> Tags:
         """What we can answer right now, without probing anything."""
-        return self.cached(path) or guess(path)
+        now = time.monotonic()
+        if now - self._memo_at > ttl:
+            self._memo = {}
+            self._memo_at = now
+        key = str(path)
+        hit = self._memo.get(key)
+        if hit is None:
+            hit = self.cached(path) or guess(path)
+            self._memo[key] = hit
+        return hit
+
+    def forget_memo(self) -> None:
+        self._memo = {}
 
     def pending(self, paths: list) -> list:
         return [path for path in paths if self.cached(path) is None]

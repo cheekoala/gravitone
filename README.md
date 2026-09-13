@@ -120,6 +120,41 @@ playlist), `q` quits.
   . silence (0:19)
 ```
 
+## Speed and stability
+
+Everything that walks the disk happens on one background worker, never on a
+request. The folder index is written to `~/.config/bgsoundtrack/index.json`,
+so a restart starts with answers rather than work, and the state the UI polls
+once a second is worked out only when something actually changes.
+
+On a 2000-file library: a poll costs ~0.02 ms (it used to re-walk every
+folder), and the server starts answering immediately instead of after the
+first scan. Tag reads and cover extraction also happen in the background —
+the Server card in Config shows what is being worked on.
+
+The track table builds 400 rows at a time and has a **filter box**; with
+thousands of tracks the page stays responsive instead of parking tens of
+thousands of nodes in the DOM. *Show all* is there when you want it.
+
+Anything in flight shows a thin sweeping bar across the top of the window,
+and buttons that take a moment (exporting a bundle, finding art) spin while
+they work.
+
+## Server controls
+
+Config → **Server** shows the address, the process id, how long it has been
+up and its version, with **Restart** and **Stop** buttons. Restart replaces
+the process in place, keeping the same port *and the same token*, so the page
+you clicked it from reconnects by itself.
+
+From a terminal:
+
+```sh
+bgst ui --status      # is one running, where, and since when
+bgst ui --stop        # stop it
+bgst ui --new         # a second one anyway
+```
+
 ## The UI
 
 `bgst ui` serves a small control panel on `127.0.0.1:8765` and opens it. It is
@@ -132,7 +167,8 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 | ![Adding: a whole folder, or just the files in it](docs/ui-add.png) | |
 
 - **Top bar** — the playlist selector; switching it switches what plays.
-- **Now** — what is playing or how long the current gap runs, with history.
+- **Now** — what is playing (named from its tags, with the album cover when
+  there is one) or how long the current gap runs, with history.
 - **Music / Ambient** — the two libraries; `✕` removes a link, never a file.
 - **Add** — *Choose a folder…* opens your desktop's own folder dialog (needs
   Tk; `bgst doctor` says whether you have it). Otherwise browse from the
@@ -191,6 +227,15 @@ as it did, folders and all.
 Playlists live in `~/.config/bgsoundtrack/playlists.json` — plain JSON, easy
 to read, back up, or edit by hand.
 
+## Album art
+
+Covers come from the picture inside the file (extracted once with ffmpeg) or
+from a `cover.jpg` / `folder.jpg` sitting beside it. The current track shows
+its cover in Now, and the table shows thumbnails for what has been found.
+**Config → Find album art** goes looking for the whole playlist in the
+background; art is cached in `~/.config/bgsoundtrack/covers/`, one per folder,
+since a record shares its cover.
+
 ## The track table
 
 Each library is a table — track number, title, artist, album, length — and
@@ -215,8 +260,8 @@ tag. Tags are read in the background and cached in
 table fills in the moment the read lands, and says how many are left while it
 works.
 
-On a phone the artist, album and length columns fold away, leaving the track
-and its title.
+The header stays put while you scroll, and on a phone the artist, album and
+length columns fold away, leaving the track and its title.
 
 ## Export and import
 

@@ -18,7 +18,7 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from bgsoundtrack import playlists, tags
+from bgsoundtrack import playlists, scanner, tags
 from bgsoundtrack.config import (
     AUDIO_EXTENSIONS,
     AMBIENT_DIRNAME,
@@ -243,34 +243,28 @@ def _is_hard_link(path: Path) -> bool:
         return False
 
 
-# Source folders are re-scanned on demand; this keeps a 1-second poll from
-# walking a big tree over and over. Mutating the sources clears it.
-_SCAN_TTL = 5.0
-_scan_cache: dict[Path, tuple[float, list[Path]]] = {}
+# One background worker owns all folder walking; see scanner.py. Nothing on
+# a request path is allowed to call rglob.
+SCANNER = scanner.Scanner(lambda path: is_audio(path))
+
+
+def configure_index(path: Path) -> None:
+    """Point the folder index at its file on disk (once, at startup)."""
+    SCANNER.load(path)
 
 
 def invalidate_cache() -> None:
-    _scan_cache.clear()
+    SCANNER.forget()
 
 
-def scan(directory: Path, ttl: float = _SCAN_TTL) -> list[Path]:
-    """Audio files under `directory`, recursively. Cached briefly."""
-    now = time.monotonic()
-    cached = _scan_cache.get(directory)
-    if cached and now - cached[0] < ttl:
-        return cached[1]
-    found: list[Path] = []
-    if directory.is_dir():
-        for entry in sorted(directory.rglob("*")):
-            if entry.name.startswith("."):
-                continue
-            try:
-                if entry.is_file() and is_audio(entry):
-                    found.append(entry)
-            except OSError:
-                continue
-    _scan_cache[directory] = (now, found)
-    return found
+def scan(directory: Path, refresh: bool = True, block_if_unknown: bool = True) -> list[Path]:
+    """Audio files under `directory`, as last indexed."""
+    return SCANNER.files(directory, refresh=refresh, block_if_unknown=block_if_unknown)
+
+
+def rescan(directory: Path) -> list[Path]:
+    """Walk it right now and return the result (the CLI can afford to wait)."""
+    return SCANNER.refresh_now(directory)
 
 
 def linked_entries(
@@ -335,24 +329,30 @@ def entries(
         for entry in linked_entries(config, section, playlist)
         if not playlist.is_excluded(entry.target)
     ]
-    seen = set()
+    # Dedupe against the links only, and only stat a folder file when its name
+    # matches one of them - otherwise a big folder costs thousands of stats
+    # to rule out a handful of links.
+    linked_names = {entry.target.name for entry in found}
+    linked_paths = {str(entry.target) for entry in found}
+    linked_keys = set()
     for entry in found:
         try:
-            seen.add(_file_key(entry.target))
+            linked_keys.add(_file_key(entry.target))
         except OSError:
             continue
 
+    excluded = set(playlist.excluded)
     for source in playlist.sources(section):
         for path in scan(source):
-            try:
-                key = _file_key(path)
-            except OSError:
+            text = str(path)
+            if text in linked_paths or text in excluded:
                 continue
-            if key in seen:
-                continue
-            seen.add(key)
-            if playlist.is_excluded(path):
-                continue
+            if path.name in linked_names:
+                try:
+                    if _file_key(path) in linked_keys:
+                        continue
+                except OSError:
+                    continue
             found.append(Entry(path=path, target=path, origin="source", source=source))
     return sort_entries(
         found,
@@ -423,7 +423,7 @@ def add_source(
     if directory in current:
         raise LibraryError(f"already a {section} source of {playlist.name}: {directory}")
     playlist.set_sources(section, current + [directory])
-    invalidate_cache()
+    rescan(directory)   # you just asked for it; have it now, not in a moment
     return directory
 
 
@@ -441,7 +441,7 @@ def remove_source(
         if not matches:
             raise LibraryError(f"not a {section} source: {directory}")
     playlist.set_sources(section, [p for p in current if p not in matches])
-    invalidate_cache()
+    SCANNER.forget(matches[0])
     return matches[0]
 
 

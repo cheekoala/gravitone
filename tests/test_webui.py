@@ -383,8 +383,10 @@ def test_a_finished_tag_read_bumps_the_version(server, tmp_path):
 
 def test_a_process_older_than_the_installed_code_is_stale(monkeypatch):
     monkeypatch.setattr(instance, "package_mtime", lambda: instance.PROCESS_START + 60)
+    instance.forget_staleness()
     assert instance.process_is_stale() is True
     monkeypatch.setattr(instance, "package_mtime", lambda: instance.PROCESS_START - 60)
+    instance.forget_staleness()
     assert instance.process_is_stale() is False
 
 
@@ -396,12 +398,15 @@ def test_a_running_instance_from_before_an_upgrade_is_stale(monkeypatch, tmp_pat
     assert instance.is_stale(older) is True
     monkeypatch.setattr(instance, "package_mtime", lambda: 500.0)
     assert instance.is_stale(older) is False
+    instance.forget_staleness()
 
 
 def test_state_says_when_the_running_code_is_out_of_date(server, monkeypatch):
     httpd, *_ = server
+    instance.forget_staleness()
     assert request(httpd, "/api/state")["stale"] is False
     monkeypatch.setattr(instance, "package_mtime", lambda: instance.PROCESS_START + 60)
+    instance.forget_staleness()
     assert request(httpd, "/api/state")["stale"] is True
 
 
@@ -419,3 +424,78 @@ def test_an_unexpected_error_answers_with_json_and_a_hint(server, monkeypatch):
     body = json.loads(caught.value.read())
     assert "sort_desc" in body["error"]
     assert "bgst ui --stop" in body["hint"]
+
+
+# -- covers, labels and server control ----------------------------------
+
+
+def test_a_cover_is_served_only_for_a_track_in_the_library(server, tmp_path):
+    httpd, session, config, _ = server
+    album = tmp_path / "album"
+    make_audio(album, "one.mp3")
+    (album / "folder.jpg").write_bytes(b"\xff\xd8\xffcover-bytes")
+    request(httpd, "/api/source", {"path": str(album)})
+
+    url = f"http://127.0.0.1:{httpd.server_port}/api/cover?track={album / 'one.mp3'}&t={httpd.token}"
+    with urllib.request.urlopen(url, timeout=5) as response:
+        assert response.read().endswith(b"cover-bytes")
+        assert response.headers["Content-Type"].startswith("image/")
+
+    # a file that is not in the library gets nothing, token or no token
+    outside = tmp_path / "secret.mp3"
+    outside.write_bytes(b"\0")
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(
+            f"http://127.0.0.1:{httpd.server_port}/api/cover?track={outside}&t={httpd.token}",
+            timeout=5,
+        )
+    assert caught.value.code == 404
+
+
+def test_a_cover_needs_the_token(server, tmp_path):
+    httpd, *_ = server
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(
+            f"http://127.0.0.1:{httpd.server_port}/api/cover?track=/x.mp3", timeout=5
+        )
+    assert caught.value.code == 403
+
+
+def test_now_playing_is_named_from_its_tags(server, tmp_path):
+    from bgsoundtrack import engine, tags
+
+    httpd, session, *_ = server
+    song = tmp_path / "album" / "01 Anchor.mp3"
+    song.parent.mkdir(parents=True)
+    song.write_bytes(b"\0")
+    session._tags.store(song, tags.Tags(title="Anchor", artist="Vela", album="Undertow"))
+    session._on_event(engine.Event("track", path=song))
+
+    now = request(httpd, "/api/state")["now"]
+    assert now["label"] == "Anchor — Vela"
+    assert now["name"] == "01 Anchor.mp3"       # the file is still named
+
+
+def test_an_untagged_track_keeps_its_file_name(server, tmp_path):
+    from bgsoundtrack import engine
+
+    httpd, session, *_ = server
+    song = tmp_path / "album" / "mystery.mp3"
+    song.parent.mkdir(parents=True)
+    song.write_bytes(b"\0")
+    session._on_event(engine.Event("track", path=song))
+    assert request(httpd, "/api/state")["now"]["label"] == "mystery.mp3"
+
+
+def test_an_unknown_server_action_is_refused(server):
+    httpd, *_ = server
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        request(httpd, "/api/server", {"action": "explode"})
+    assert caught.value.code == 400
+
+
+def test_state_reports_what_the_server_is_doing(server):
+    httpd, *_ = server
+    state = request(httpd, "/api/state")
+    for key in ("pid", "started", "indexing", "tags_pending", "art_pending", "version"):
+        assert key in state

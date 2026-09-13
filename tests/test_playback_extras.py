@@ -275,3 +275,45 @@ def test_ban_without_a_name_still_takes_what_is_playing(session, tmp_path, monke
 
     session._on_event(engine.Event("track", path=album / "only.mp3"))
     assert session.ban()["name"] == "only.mp3"
+
+
+def test_bgst_play_prints_events_without_crashing(tmp_path, monkeypatch, capsys):
+    """`bgst play` walks the event callback for real - a track event has no
+    duration, and formatting one used to raise."""
+    from bgsoundtrack import cli, engine as engine_module, player as player_module
+
+    monkeypatch.setenv("BGSOUNDTRACK_ROOT", str(tmp_path / "lib"))
+    monkeypatch.setenv("BGSOUNDTRACK_CONFIG", str(tmp_path / "config.json"))
+    album = tmp_path / "album"
+    album.mkdir()
+    (album / "song.mp3").write_bytes(b"\0")
+    assert cli.main(["init"]) == 0
+    assert cli.main(["folder", "add", str(album)]) == 0
+
+    class Done:
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            pass
+
+        kill = terminate
+
+    monkeypatch.setattr(
+        player_module, "detect", lambda preferred=None: player_module.Backend("ffplay", "/bin/true")
+    )
+    monkeypatch.setattr(
+        engine_module.player,
+        "play",
+        lambda backend, path, volume=70, duration=None, start=None: player_module.Playback(
+            Done(), path
+        ),
+    )
+    monkeypatch.setattr(engine_module.time, "sleep", lambda _s: None)
+
+    assert cli.main(["play", "--no-keys", "--no-loop", "--gap-min", "0", "--gap-max", "0"]) == 0
+    out = capsys.readouterr().out
+    assert "song.mp3" in out and "stopped" in out

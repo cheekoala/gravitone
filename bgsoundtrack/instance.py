@@ -114,9 +114,27 @@ def package_mtime() -> float:
     return newest
 
 
-def process_is_stale() -> bool:
-    """True if bgst was updated on disk after this process started."""
-    return package_mtime() > PROCESS_START + 1
+_staleness: tuple = (0.0, False)
+
+
+def forget_staleness() -> None:
+    """Drop the cached answer - after an install, or in a test."""
+    global _staleness
+    _staleness = (0.0, False)
+
+
+def process_is_stale(ttl: float = 10.0) -> bool:
+    """True if bgst was updated on disk after this process started.
+
+    Cached: this is asked once a second and answers by stat()ing the package.
+    """
+    global _staleness
+    now = time.monotonic()
+    if now - _staleness[0] < ttl:
+        return _staleness[1]
+    value = package_mtime() > PROCESS_START + 1
+    _staleness = (now, value)
+    return value
 
 
 def is_stale(instance: Instance) -> bool:

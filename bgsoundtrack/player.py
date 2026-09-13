@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -106,8 +107,18 @@ def detect(preferred: str | None = None) -> Backend:
     )
 
 
-def available() -> list[str]:
-    return [name for name in CANDIDATES if shutil.which(name)]
+_available: tuple = (0.0, [])
+
+
+def available(ttl: float = 15.0) -> list[str]:
+    """Which players are installed. Cached - this is on a one-second poll."""
+    global _available
+    now = time.monotonic()
+    if now - _available[0] < ttl:
+        return list(_available[1])
+    found = [name for name in CANDIDATES if shutil.which(name)]
+    _available = (now, found)
+    return list(found)
 
 
 class Playback:
