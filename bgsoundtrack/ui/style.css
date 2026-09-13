@@ -33,7 +33,7 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   height: 100%;
   display: flex;
   flex-direction: column;
-  max-width: 1100px;
+  max-width: 1440px;
   margin: 0 auto;
   border-left: 1px solid var(--line-soft);
   border-right: 1px solid var(--line-soft);
@@ -221,7 +221,12 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   /* No overflow here: it would become the scroll container and the sticky
      header would have nothing to stick to. The stage scrolls instead. */
 }
-table.tracks { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.tracks {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  /* Fixed: with auto layout the browser sizes columns to the longest album
+     title and the table walks straight out of the panel. */
+  table-layout: fixed;
+}
 table.tracks th, table.tracks td {
   text-align: left; padding: 7px 10px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
@@ -255,21 +260,26 @@ table.tracks tbody tr.playing .t-title { color: #d9ccff; }
 table.tracks tbody tr.broken .t-title { color: #ff9ea1; }
 table.tracks tbody tr.empty td { color: var(--faint); padding: 16px 10px; white-space: normal; }
 
-.col-no { width: 44px; text-align: right !important; }
+.col-cover { width: 40px; }
+.col-no { width: 40px; text-align: right !important; }
 td.col-no { font: 11px/1 var(--mono); color: var(--faint); text-align: right; }
-.col-title { width: 40%; }
-.col-artist, .col-album { width: 22%; color: var(--muted); }
-.col-length { width: 70px; text-align: right !important; }
+.col-title { width: 38%; }
+.col-artist { width: 21%; color: var(--muted); }
+.col-album { width: 21%; color: var(--muted); }
+.col-length { width: 66px; text-align: right !important; }
 td.col-length { font: 11px/1 var(--mono); color: var(--faint); }
-.col-actions { width: 74px; }
+.col-actions { width: 62px; }
+/* Anything too long ends in an ellipsis, with the whole value on hover. */
+table.tracks td > div, table.tracks td { min-width: 0; }
 td.col-actions { text-align: right; padding-right: 8px; }
-.t-title { color: var(--text); }
+.t-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 td.guessed { color: var(--faint); font-style: italic; }
 .t-sub { font: 10.5px/1.4 var(--mono); color: var(--faint); }
 /* The origin marker matters when you press ✕, not while you are reading
    the list, so it keeps quiet until the row is under the cursor. */
-td .tag { margin-right: 4px; opacity: .3; transition: opacity .12s; }
-table.tracks tbody tr:hover td .tag, table.tracks tbody tr.playing td .tag { opacity: 1; }
+.origin { display: inline-flex; color: var(--faint); opacity: .45; transition: opacity .12s; vertical-align: -3px; }
+.origin .icon { width: 14px; height: 14px; }
+table.tracks tbody tr:hover .origin, table.tracks tbody tr.playing .origin { opacity: 1; color: #c4b5fd; }
 .t-remove {
   background: none; border: none; color: var(--faint); padding: 3px 5px; border-radius: 6px;
 }
@@ -424,7 +434,7 @@ button.busy { opacity: .75; pointer-events: none; }
 }
 .cover.empty { display: grid; place-items: center; color: var(--faint); font-size: 22px; }
 .now-head .now-body { min-width: 0; flex: 1; }
-td.col-cover { width: 34px; padding-right: 0; }
+td.col-cover { padding-right: 0; }
 .thumb {
   width: 24px; height: 24px; border-radius: 4px; object-fit: cover;
   background: var(--panel-2); display: block;
@@ -457,6 +467,13 @@ td.col-cover { width: 34px; padding-right: 0; }
 
 @media (max-width: 620px) {
   .col-length { display: none; }
+  /* The heading, the filter and the switch will not share one line at this
+     width, so give the filter its own. */
+  .panel-head { flex-wrap: wrap; row-gap: 8px; }
+  .head-tools { width: 100%; order: 3; }
+  .head-tools .filter { flex: 1; width: auto; }
+  .head-tools .filter:focus { width: auto; }
+  .switch.inline { white-space: nowrap; }
   /* Keep the top bar on one line: the path goes, the playlist name shortens,
      and Ban keeps its icon but drops its label. */
   .brand-sub { display: none; }
