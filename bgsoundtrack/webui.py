@@ -124,7 +124,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         if self.command != "HEAD":
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass    # a page that navigated away mid-response
 
     def _json(self, payload, status: int = HTTPStatus.OK) -> None:
         self._send(status, json.dumps(payload).encode("utf-8"), "application/json")
@@ -195,6 +198,8 @@ class Handler(BaseHTTPRequestHandler):
         except player.PlaybackError as exc:
             self._json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
             return
+        except (BrokenPipeError, ConnectionResetError):
+            return          # the browser went away mid-answer; nothing to say
         except Exception as exc:  # noqa: BLE001 - an answer beats a dead socket
             # Without this the connection just closes and the page shows
             # "disconnected", which says nothing about what went wrong.

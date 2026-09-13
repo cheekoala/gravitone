@@ -167,8 +167,10 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 | ![Adding: a whole folder, or just the files in it](docs/ui-add.png) | |
 
 - **Top bar** — the playlist selector; switching it switches what plays.
-- **Now** — what is playing (named from its tags, with the album cover when
-  there is one) or how long the current gap runs, with history.
+- **Now** — what is playing, named from its tags (`Anchor — Vela`, with the
+  album underneath and the cover beside it) or how long the current gap runs,
+  with history. Tags for the playing track are read on the spot, so this
+  works whether or not you have opened the library table.
 - **Music / Ambient** — the two libraries; `✕` removes a link, never a file.
 - **Add** — *Choose a folder…* opens your desktop's own folder dialog (needs
   Tk; `bgst doctor` says whether you have it). Otherwise browse from the
@@ -230,7 +232,10 @@ to read, back up, or edit by hand.
 ## Album art
 
 Covers come from the picture inside the file (extracted once with ffmpeg) or
-from a `cover.jpg` / `folder.jpg` sitting beside it. The current track shows
+from a `cover.jpg` / `folder.jpg` sitting beside it. Plenty of rips carry the
+picture on only one track, so a record is searched across its first few files
+before it is called coverless — and that answer is remembered, so an album
+without art is never searched twice. The current track shows
 its cover in Now, and the table shows thumbnails for what has been found.
 **Config → Find album art** goes looking for the whole playlist in the
 background; art is cached in `~/.config/bgsoundtrack/covers/`, one per folder,

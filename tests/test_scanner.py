@@ -144,3 +144,48 @@ def test_art_is_shared_by_everything_in_one_folder(tmp_path):
     (folder / "cover.png").write_bytes(b"\x89PNG")
     covers = art.Art(tmp_path / "covers")
     assert covers.find(folder / "one.mp3") == covers.find(folder / "two.mp3")
+
+
+def test_a_record_is_searched_for_its_cover_not_just_one_track(tmp_path, monkeypatch):
+    """The picture often sits on one track of an album and not the others."""
+    folder = album(tmp_path / "album", "01 first.mp3", "02 second.mp3", "03 third.mp3")
+    covers = art.Art(tmp_path / "covers")
+
+    tried = []
+
+    def fake_extract(path, remember_failure=True):
+        tried.append(path.name)
+        if path.name != "03 third.mp3":
+            return None
+        target = covers.directory / "cover.jpg"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"\xff\xd8\xff")
+        return target
+
+    monkeypatch.setattr(covers, "_extract", fake_extract)
+    assert covers.find(folder / "01 first.mp3") is not None
+    assert tried == ["01 first.mp3", "02 second.mp3", "03 third.mp3"]
+
+
+def test_a_record_with_no_art_anywhere_is_only_searched_once(tmp_path, monkeypatch):
+    folder = album(tmp_path / "album", "01 a.mp3", "02 b.mp3")
+    covers = art.Art(tmp_path / "covers")
+    tried = []
+    monkeypatch.setattr(
+        covers, "_extract", lambda path, remember_failure=True: tried.append(path) or None
+    )
+    assert covers.find(folder / "01 a.mp3") is None
+    assert covers.find(folder / "02 b.mp3") is None      # remembered, not retried
+    assert len(tried) == 2
+
+
+def test_art_for_a_link_belongs_to_the_file_it_points_at(tmp_path):
+    real = album(tmp_path / "Artist" / "Album", "song.mp3")
+    (real / "cover.jpg").write_bytes(b"\xff\xd8\xff")
+    links = tmp_path / "library"
+    links.mkdir()
+    link = links / "song.mp3"
+    link.symlink_to(real / "song.mp3")
+
+    covers = art.Art(tmp_path / "covers")
+    assert covers.find(link) == real / "cover.jpg"

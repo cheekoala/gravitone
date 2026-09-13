@@ -13,7 +13,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from bgsoundtrack.config import config_path
+from bgsoundtrack.config import AUDIO_EXTENSIONS, config_path
 
 # What a cover is usually called when it sits beside the music.
 BESIDE = (
@@ -21,6 +21,9 @@ BESIDE = (
     "folder.png", "front.jpg", "front.png", "album.jpg", "albumart.jpg",
 )
 MAX_BYTES = 6 * 1024 * 1024
+# How many tracks of a record to try before deciding it has no cover. Plenty
+# of rips carry the picture on only one or two files.
+SIBLINGS = 5
 
 
 def cache_dir(config_file: Path | None = None) -> Path:
@@ -37,13 +40,35 @@ class Art:
         self._known: dict = {}      # path -> cover file, or None for "none"
         self._working: set = set()
 
+    @staticmethod
+    def real(path: Path) -> Path:
+        """The file itself, not the link pointing at it."""
+        try:
+            return path.resolve()
+        except OSError:
+            return path
+
     def _key(self, path: Path) -> str:
         # Albums share art, so key on the folder rather than the track: one
-        # extraction covers a whole record.
-        return hashlib.sha1(str(path.parent).encode("utf-8")).hexdigest()[:16]
+        # extraction covers a whole record. Resolve first, or every link in
+        # the library folder would claim the same cover.
+        return hashlib.sha1(str(self.real(path).parent).encode("utf-8")).hexdigest()[:16]
+
+    def answered(self, path: Path) -> tuple:
+        """(have we looked, what we found). "No cover" is an answer.
+
+        Without this, a record with no art anywhere gets ffmpeg run over it
+        again every time one of its tracks plays.
+        """
+        path = self.real(path)
+        with self._lock:
+            if str(path.parent) in self._known:
+                return (True, self._known[str(path.parent)])
+        return (False, None)
 
     def cached(self, path: Path) -> Path | None:
         """The cover we already have for this track, if any."""
+        path = self.real(path)
         with self._lock:
             if str(path.parent) in self._known:
                 return self._known[str(path.parent)]
@@ -56,6 +81,7 @@ class Art:
         return None
 
     def beside(self, path: Path) -> Path | None:
+        path = self.real(path)
         for name in BESIDE:
             candidate = path.parent / name
             try:
@@ -65,19 +91,48 @@ class Art:
                 continue
         return None
 
+    def siblings(self, path: Path) -> list:
+        """This track, then a few of its neighbours in the same folder.
+
+        The picture often lives on one track of a record and not the rest, so
+        looking only at what happens to be playing finds nothing far too
+        often.
+        """
+        found = [path]
+        try:
+            for other in sorted(path.parent.iterdir()):
+                if len(found) >= SIBLINGS:
+                    break
+                if other == path or other.suffix.lower() not in AUDIO_EXTENSIONS:
+                    continue
+                if other.is_file():
+                    found.append(other)
+        except OSError:
+            pass
+        return found
+
     def find(self, path: Path) -> Path | None:
-        """Look properly: cache, then a file beside it, then inside it."""
-        found = self.cached(path)
-        if found is not None:
+        """Look properly: cache, then a file beside it, then inside the
+        record's own tracks."""
+        path = self.real(path)
+        asked, found = self.answered(path)
+        if asked:
             return found
         beside = self.beside(path)
         if beside is not None:
             with self._lock:
                 self._known[str(path.parent)] = beside
             return beside
-        return self._extract(path)
 
-    def _extract(self, path: Path) -> Path | None:
+        for candidate in self.siblings(path):
+            extracted = self._extract(candidate, remember_failure=False)
+            if extracted is not None:
+                return extracted
+        with self._lock:
+            self._known[str(path.parent)] = None    # asked the record, properly
+        return None
+
+    def _extract(self, path: Path, remember_failure: bool = True) -> Path | None:
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             return None
@@ -99,8 +154,9 @@ class Art:
             return None
         if done.returncode != 0 or not target.exists() or target.stat().st_size == 0:
             target.unlink(missing_ok=True)
-            with self._lock:
-                self._known[str(path.parent)] = None   # asked and answered
+            if remember_failure:
+                with self._lock:
+                    self._known[str(path.parent)] = None   # asked and answered
             return None
         with self._lock:
             self._known[str(path.parent)] = target
@@ -108,6 +164,7 @@ class Art:
 
     def want(self, path: Path) -> None:
         """Find it in the background - for the track that just started."""
+        path = self.real(path)
         key = str(path.parent)
         with self._lock:
             if key in self._known or key in self._working:

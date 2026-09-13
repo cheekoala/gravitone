@@ -491,7 +491,10 @@ def cmd_play(args) -> int:
     reader = tag_reader.Reader()
 
     def label(path: Path) -> str:
-        known = reader.known(path)
+        try:
+            known = reader.known(path.resolve())   # a link's tags are the file's
+        except OSError:
+            known = reader.known(path)
         if known.guessed or not known.title:
             return path.name
         return f"{known.title} — {known.artist}" if known.artist else known.title

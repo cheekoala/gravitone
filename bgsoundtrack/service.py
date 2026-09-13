@@ -142,7 +142,7 @@ class Session:
             "art_pending": self._art_pending,
             "started": self._started,
             "pid": os.getpid(),
-            "history": list(self._history[-12:]),
+            "history": [self._label(Path(item)) for item in self._history[-12:]],
             "now": None if now is None else self._describe(now),
             "hidden": self.config.hide_gaps,
             "config": self.config.to_dict(),
@@ -166,11 +166,19 @@ class Session:
             ],
         }
 
+    @staticmethod
+    def _real(path: Path) -> Path:
+        """A playing track may be a link; its tags live against the file."""
+        try:
+            return Path(path).resolve()
+        except OSError:
+            return Path(path)
+
     def _label(self, path: Path) -> str:
         """What to call a track: its tags if we have them, else its file name."""
-        known = self._tags.known(path)
+        known = self._tags.known(self._real(path))
         if known.guessed or not known.title:
-            return path.name
+            return Path(path).name
         return f"{known.title} — {known.artist}" if known.artist else known.title
 
     def _describe(self, now: NowPlaying) -> dict:
@@ -180,8 +188,9 @@ class Session:
         - a countdown you can read is not a silence you can sink into.
         """
         hide = self.config.hide_gaps and now.kind != "track"
-        known = self._tags.known(Path(now.path)) if now.path else None
-        cover = self._art.cached(Path(now.path)) if now.path else None
+        real = self._real(now.path) if now.path else None
+        known = self._tags.known(real) if real else None
+        cover = self._art.cached(real) if real else None
         return {
             "kind": now.kind,
             "name": now.name,
@@ -334,19 +343,30 @@ class Session:
             duration=event.duration,
         )
         if event.kind == "track":
-            self._history.append(self._label(event.path))
-            self._probe_async(event.path, self._now)
+            # Keep the path: the label is worked out when it is shown, so a
+            # tag read that lands a second later fixes the history too.
+            self._history.append(str(event.path))
+            self._probe_async(self._real(event.path), self._now)
         if event.path:
-            self._art.want(event.path)
+            self._art.want(event.path)   # resolves the link itself
 
     def _probe_async(self, path: Path, entry: NowPlaying) -> None:
-        """Fill in the track length in the background - ffprobe must not
-        delay playback, and it may not be installed at all."""
+        """Read this track's length and tags in the background.
+
+        Without this, a track only had a title and a cover if you had opened
+        the library table at some point - the player would sit there showing
+        a file name for music it could perfectly well have read.
+        """
 
         def work() -> None:
             duration = player.probe_duration(path)
             if duration is not None and self._now is entry:
                 entry.duration = duration
+            before = self._tags.cached(path)
+            known = self._tags.read(path)
+            if before is None or before != known:
+                self._tags.save()
+                self._tags_version += 1
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -497,11 +517,19 @@ class Session:
     # -- covers ----------------------------------------------------------
 
     def cover(self, track: str) -> Path | None:
-        """The cover for a track we know about - and only for such a track."""
-        path = Path(track).expanduser()
+        """The cover for a track we know about - and only for such a track.
+
+        The page may name the track by the link it is played through or by
+        the file behind it; both are the same track.
+        """
+        asked = Path(track).expanduser()
+        real = self._real(asked)
         for section in library.SECTIONS:
             for entry in library.entries(self.config, section, self.playlist):
-                if str(entry.target) == str(path):
+                if str(entry.path) in (str(asked), str(real)) or str(entry.target) in (
+                    str(asked),
+                    str(real),
+                ):
                     return self._art.cached(entry.target) or self._art.find(entry.target)
         return None
 

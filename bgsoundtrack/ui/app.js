@@ -204,8 +204,13 @@
     $("now-title").textContent = now
       ? (now.kind === "silence" ? "Quiet" : (now.label || now.name))
       : (next.error ? "Stopped" : "Nothing playing");
-    const sub = now && now.kind !== "silence" && now.label !== now.name ? now.name : "";
+    // Under the title: the album if we know it, otherwise the file it came
+    // from. The file name is always in the tooltip.
+    const sub = now && now.kind !== "silence"
+      ? (now.album || (now.label !== now.name ? now.name : ""))
+      : "";
     $("now-sub").textContent = sub;
+    $("now-sub").title = now ? now.name : "";
     renderCover(now);
     const hiddenNow = inGap && next.hidden;
     const pct = now && now.duration ? Math.min(100, (now.elapsed / now.duration) * 100) : 0;
