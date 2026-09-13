@@ -260,8 +260,14 @@ tag. Tags are read in the background and cached in
 table fills in the moment the read lands, and says how many are left while it
 works.
 
-The header stays put while you scroll, and on a phone the artist, album and
-length columns fold away, leaving the track and its title.
+The header stays put while you scroll. Columns keep their share of the width
+and truncate with an ellipsis (the full value is in the tooltip), so a
+sprawling album title can never push the table out of its panel. On a phone
+the artist, album and length columns fold away, leaving the track and its
+title, and the filter box takes its own line.
+
+The window is 1440px wide at most, so a desktop gets a properly wide table
+without the settings cards stretching into something silly.
 
 ## Export and import
 
@@ -486,6 +492,11 @@ Its log, when started from the installer or a shortcut, is
 ```sh
 python -m pytest
 ```
+
+Most of it needs nothing but Python. `tests/test_layout.py` drives a real
+browser to check the table stays inside its panel and the header sticks —
+CSS facts that no amount of Python can see — and skips itself when there is
+no chromium to drive.
 
 No test needs an audio device: playback is faked and the clock is injected,
 so the suite runs in about a second anywhere.

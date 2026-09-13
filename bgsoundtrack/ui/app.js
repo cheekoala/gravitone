@@ -472,6 +472,8 @@
       // A guess read off the path is shown, but never dressed up as a tag.
       const artist = el("td", "col-artist", track.artist || "—");
       const album = el("td", "col-album", track.album || "—");
+      artist.title = track.artist || "";
+      album.title = track.album || "";
       if (track.guessed) {
         [artist, album].forEach((cell) => {
           cell.classList.add("guessed");
@@ -482,9 +484,13 @@
 
       const actions = el("td", "col-actions");
       if (track.origin === "source") {
-        const tag = el("span", "tag source", "folder");
-        tag.title = `From the folder ${track.source}`;
-        actions.append(tag);
+        // An icon, not a word: the column is narrow and the meaning only
+        // matters when you are about to press ✕ next to it.
+        const mark = el("span", "origin");
+        mark.innerHTML = '<svg viewBox="0 0 24 24" class="icon">'
+          + '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+        mark.title = `Played from the folder ${track.source}`;
+        actions.append(mark);
       }
       const remove = el("button", "t-remove", "✕");
       remove.title = track.origin === "source"
