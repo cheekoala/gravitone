@@ -30,6 +30,7 @@
   };
 
   let state = null;
+  let tagsSeen = null;     // the tag-read generation the table was built from
   let panel = "now";
   let section = "music";      // which library the Add panel targets
   let browsePath = null;
@@ -136,7 +137,12 @@
 
   // -- render ---------------------------------------------------------
   function render(next) {
+    const previous = state;
     state = next;
+    // The table shows what the tag reader knows; when a background batch
+    // lands, fetch the rows again so guesses give way to the real thing.
+    if (tagsSeen !== null && next.tags_version !== tagsSeen) refreshLibraries();
+    tagsSeen = next.tags_version;
     const { config, now, running } = next;
 
     $("root-path").textContent = shortPath(config.root, 44);
@@ -212,33 +218,30 @@
     if (document.activeElement !== picker) picker.value = next.playlist;
   }
 
-  const SORT_LABELS = {
-    name: "File name",
-    title: "Title",
-    artist: "Artist",
-    album: "Album",
-  };
-
   function renderSortPickers(next) {
-    document.querySelectorAll("select.sort").forEach((picker) => {
-      if (!picker.options.length) {
-        next.sorts.forEach((value) => {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = SORT_LABELS[value] || value;
-          picker.append(option);
-        });
+    const showFiles = next.config.show_filenames;
+    document.querySelectorAll("input.filenames").forEach((box) => {
+      box.checked = showFiles;
+    });
+    // The first column is whichever of the two you chose to look at, so its
+    // header sorts by that same thing.
+    document.querySelectorAll("th[data-sort]").forEach((head) => {
+      if (head.classList.contains("col-title")) {
+        head.dataset.sort = showFiles ? "name" : "title";
+        head.querySelector("span").textContent = showFiles ? "File name" : "Title";
       }
-      if (document.activeElement !== picker) picker.value = next.sort;
+      const active = head.dataset.sort === next.sort;
+      head.classList.toggle("sorted", active);
+      head.classList.toggle("desc", active && next.config.sort_desc);
     });
     ["music", "ambient"].forEach((name) => {
       const note = $(`${name}-tags`);
-      // Tags are read in the background; say so rather than sorting silently
-      // by a guess taken from the path.
-      note.hidden = !next.tags_pending || next.sort === "name";
+      // Tags are read in the background; say so rather than showing a guess
+      // taken from the path as though it were the real thing.
+      note.hidden = !next.tags_pending;
       if (!note.hidden) {
         note.textContent = `Reading tags — ${next.tags_pending} to go. `
-          + `Until then these are ordered by what the folder names say.`;
+          + `Until then, titles and artists are read from the file paths.`;
       }
     });
   }
@@ -324,48 +327,72 @@
   }
 
   function renderLibrary(name) {
-    const list = $(`${name}-list`);
+    const body = $(`${name}-list`);
     const data = libraries[name];
     if (!data) return;                       // not fetched yet
     const broken = data.broken || [];
-    list.replaceChildren();
+    const showFiles = state.config.show_filenames;
+    body.replaceChildren();
 
     if (!data.tracks.length && !broken.length) {
-      list.append(el("li", "empty", name === "music"
+      const row = el("tr", "empty");
+      const cell = el("td", null, name === "music"
         ? "No music yet — open Add, then add a folder or link files."
-        : "No ambience yet — rain, wind, room tone, a distant tavern."));
+        : "No ambience yet — rain, wind, room tone, a distant tavern.");
+      cell.colSpan = 6;
+      row.append(cell);
+      body.append(row);
       return;
     }
 
-    const playing = state && state.now && state.now.name;
+    const playing = state.now && state.now.name;
     data.tracks.forEach((track) => {
-      const row = el("li", track.name === playing && state.running ? "playing" : null);
-      const body = el("div", "t-body");
-      const meta = [track.artist, track.album].filter(Boolean).join(" — ");
-      body.append(
-        el("div", "t-name", track.title && state.sort !== "name" ? track.title : track.name),
-        el("div", "t-target", meta && state.sort !== "name" ? meta : shortPath(track.target))
-      );
-      row.append(body);
+      const row = el("tr", track.name === playing && state.running ? "playing" : null);
+      row.append(el("td", "col-no", track.track ? String(track.track) : ""));
+
+      const title = el("td", "col-title");
+      title.append(el("div", "t-title", showFiles ? track.name : (track.title || track.name)));
+      title.title = track.target;
+      row.append(title);
+
+      // A guess read off the path is shown, but never dressed up as a tag.
+      const artist = el("td", "col-artist", track.artist || "—");
+      const album = el("td", "col-album", track.album || "—");
+      if (track.guessed) {
+        [artist, album].forEach((cell) => {
+          cell.classList.add("guessed");
+          cell.title = "Read from the file path — no tags on this file (yet)";
+        });
+      }
+      row.append(artist, album, el("td", "col-length", track.duration ? clock(track.duration) : "—"));
+
+      const actions = el("td", "col-actions");
       if (track.origin === "source") {
         const tag = el("span", "tag source", "folder");
         tag.title = `From the folder ${track.source}`;
-        row.append(tag);
+        actions.append(tag);
       }
       const remove = el("button", "t-remove", "✕");
       remove.title = track.origin === "source"
-        ? `Remove from this playlist (the file stays where it is)`
+        ? "Remove from this playlist (the file stays where it is)"
         : `Unlink ${track.name} from this playlist`;
       remove.addEventListener("click", () => removeTrack(track.name, name));
-      row.append(remove);
-      list.append(row);
+      actions.append(remove);
+      row.append(actions);
+      body.append(row);
     });
+
     broken.forEach((brokenName) => {
-      const row = el("li", "broken");
-      const body = el("div", "t-body");
-      body.append(el("div", "t-name", brokenName), el("div", "t-target", "target missing"));
-      row.append(body);
-      list.append(row);
+      const row = el("tr", "broken");
+      row.append(
+        el("td", "col-no", ""),
+        el("td", "col-title", brokenName),
+        el("td", "col-artist", "—"),
+        el("td", "col-album", "target missing"),
+        el("td", "col-length", "—"),
+        el("td", "col-actions", "")
+      );
+      body.append(row);
     });
   }
 
@@ -474,10 +501,22 @@
     }
   }
 
-  function invalidate() {
+  function refreshLibraries() {
     libraries.music = null;
     libraries.ambient = null;
     if (panel === "music" || panel === "ambient") loadLibrary(panel);
+  }
+
+  const invalidate = refreshLibraries;
+
+  async function sortBy(column) {
+    if (!state) return;
+    // The same column again flips the direction; a new one starts ascending.
+    const patch = state.sort === column
+      ? { sort_desc: !state.config.sort_desc }
+      : { sort_by: column, sort_desc: false };
+    const done = await call("config", patch);
+    if (done) refreshLibraries();
   }
 
   async function removeTrack(name, sectionName) {
@@ -741,10 +780,18 @@
     if (value) browse(value);
   });
   $("playlist-select").addEventListener("change", (event) => selectPlaylist(event.target.value));
-  document.querySelectorAll("select.sort").forEach((picker) =>
-    picker.addEventListener("change", async () => {
-      const done = await call("config", { sort_by: picker.value });
-      if (done) { libraries.music = null; libraries.ambient = null; loadLibrary(panel); }
+  document.querySelectorAll("th[data-sort]").forEach((head) =>
+    head.addEventListener("click", () => sortBy(head.dataset.sort)));
+  document.querySelectorAll("input.filenames").forEach((box) =>
+    box.addEventListener("change", async () => {
+      // Follow the column across: sorting by the first column keeps sorting
+      // by whatever it now shows.
+      const patch = { show_filenames: box.checked };
+      if (state && (state.sort === "name" || state.sort === "title")) {
+        patch.sort_by = box.checked ? "name" : "title";
+      }
+      const done = await call("config", patch);
+      if (done) refreshLibraries();
     }));
   $("new-playlist-form").addEventListener("submit", async (event) => {
     event.preventDefault();

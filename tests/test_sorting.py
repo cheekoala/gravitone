@@ -134,3 +134,57 @@ def test_sorting_also_sets_the_play_order_without_shuffle(library_of, reader):
     config.sort_by = "title"
     played = library.tracks(config, "music", playlist)
     assert [path.name for path in played][0] == "01 Anchor.flac"
+
+
+# -- the table's columns ------------------------------------------------
+
+
+def test_length_is_a_sortable_column(library_of, reader):
+    config, playlist, tmp_path = library_of
+    lengths = {"01 Anchor.flac": 35.0, "02 Bell.flac": 52.0, "01 Zenith.flac": 28.0}
+    for entry in library.entries(config, "music", playlist):
+        reader.store(entry.target, tags.Tags(title=entry.name, duration=lengths[entry.name]))
+
+    found = library.entries(config, "music", playlist, sort="length", reader=reader)
+    assert names(found) == ["01 Zenith.flac", "01 Anchor.flac", "02 Bell.flac"]
+
+
+def test_tracks_without_a_length_sort_last(reader, tmp_path):
+    timed = tags.Tags(title="Timed", duration=10.0)
+    untimed = tags.Tags(title="Untimed")
+    assert timed.key("length") < untimed.key("length")
+
+
+def test_descending_flips_the_order(library_of, reader):
+    config, playlist, _ = library_of
+    up = library.entries(config, "music", playlist, sort="name", reader=reader)
+    down = library.entries(
+        config, "music", playlist, sort="name", reader=reader, descending=True
+    )
+    assert names(down) == list(reversed(names(up)))
+
+
+def test_the_descending_setting_is_honoured(library_of, reader):
+    config, playlist, _ = library_of
+    config.sort_desc = True
+    found = library.entries(config, "music", playlist, reader=reader)
+    assert names(found)[0] == "02 Bell.flac"
+
+
+def test_a_duration_is_cached_with_the_rest(tmp_path):
+    song = tmp_path / "song.mp3"
+    song.write_bytes(b"\0")
+    first = tags.Reader(tmp_path / "tags.json")
+    first.store(song, tags.Tags(title="Song", duration=12.5))
+    first._dirty = True
+    first.save()
+    assert tags.Reader(tmp_path / "tags.json").cached(song).duration == 12.5
+
+
+def test_show_filenames_is_a_setting():
+    from bgsoundtrack.config import Config as C
+
+    assert C().show_filenames is True
+    cfg = C(show_filenames=False)
+    cfg.validate()
+    assert cfg.show_filenames is False

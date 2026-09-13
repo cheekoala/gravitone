@@ -19,7 +19,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from bgsoundtrack import playlists, tags
-from bgsoundtrack.config import AUDIO_EXTENSIONS, MUSIC_DIRNAME, AMBIENT_DIRNAME, Config
+from bgsoundtrack.config import (
+    AUDIO_EXTENSIONS,
+    AMBIENT_DIRNAME,
+    MUSIC_DIRNAME,
+    Config,
+)
 from bgsoundtrack.playlists import Playlist
 
 SECTIONS = ("music", "ambient")
@@ -288,22 +293,26 @@ def linked_entries(
     return found
 
 
-SORTS = ("name", "title", "artist", "album")
+from bgsoundtrack.config import SORTS
 
 
-def sort_entries(found: list[Entry], sort: str = "name", reader=None) -> list[Entry]:
-    """Order a track list by filename, title, artist or album.
+def sort_entries(
+    found: list[Entry], sort: str = "name", reader=None, descending: bool = False
+) -> list[Entry]:
+    """Order a track list by one of the table's columns.
 
     Tags are only read from the cache here (never probed), so a listing stays
     instant; whatever is not cached yet falls back to what the path says.
     """
     if sort not in SORTS or sort == "name":
-        return sorted(found, key=lambda entry: entry.name.lower())
-    reader = reader or tags.Reader()
-    return sorted(
-        found,
-        key=lambda entry: reader.known(entry.target).key(sort) + (entry.name.lower(),),
-    )
+        ordered = sorted(found, key=lambda entry: entry.name.lower())
+    else:
+        reader = reader or tags.Reader()
+        ordered = sorted(
+            found,
+            key=lambda entry: reader.known(entry.target).key(sort) + (entry.name.lower(),),
+        )
+    return list(reversed(ordered)) if descending else ordered
 
 
 def entries(
@@ -312,6 +321,7 @@ def entries(
     playlist: Playlist | None = None,
     sort: str | None = None,
     reader=None,
+    descending: bool | None = None,
 ) -> list[Entry]:
     """Everything playable in a section: links first, then source folders.
 
@@ -344,7 +354,12 @@ def entries(
             if playlist.is_excluded(path):
                 continue
             found.append(Entry(path=path, target=path, origin="source", source=source))
-    return sort_entries(found, sort or config.sort_by, reader)
+    return sort_entries(
+        found,
+        sort or config.sort_by,
+        reader,
+        config.sort_desc if descending is None else descending,
+    )
 
 
 def tracks(

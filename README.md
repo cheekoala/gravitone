@@ -128,7 +128,7 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 
 | | |
 | --- | --- |
-| ![The music library, sorted by album](docs/ui-library.png) | ![Settings: folders, export and import](docs/ui-settings.png) |
+| ![The track table, sorted by album, with one row playing](docs/ui-library.png) | ![Settings: folders, export and import](docs/ui-settings.png) |
 | ![Adding: a whole folder, or just the files in it](docs/ui-add.png) | |
 
 - **Top bar** — the playlist selector; switching it switches what plays.
@@ -191,23 +191,32 @@ as it did, folders and all.
 Playlists live in `~/.config/bgsoundtrack/playlists.json` — plain JSON, easy
 to read, back up, or edit by hand.
 
-## Sorting
+## The track table
 
-Each library panel has a sort picker: **file name**, **title**, **artist** or
-**album**. It is also the play order when shuffle is off, and it is a setting,
-so it sticks.
+Each library is a table — track number, title, artist, album, length — and
+**clicking a column header sorts by it**, the same header again reverses it.
+The order sticks (it is a setting) and it is also the play order when shuffle
+is off.
+
+The **File names** switch decides what the first column is: the file on disk,
+or the title tag. Whichever it shows is what its header sorts by, so the
+column and the sort never disagree.
 
 ```sh
-bgst list --sort album        # or artist, title, name
-bgst config sort_by=artist    # the default from now on
+bgst list --sort album        # name, title, artist, album, length
+bgst config sort_by=artist sort_desc=true
 ```
 
 Tags come from `ffprobe` (part of ffmpeg). Anything it cannot read falls back
-to what the path says — `Artist/Album/03 Title.flac` is a convention for a
-reason — and album sorting puts track numbers in order within a record. Tags
-are read in the background and cached in `~/.config/bgsoundtrack/tags.json`,
-so a listing never waits on a probe; while it is still working the panel says
-how many are left.
+to the path — `Artist/Album/03 Title.flac` is a convention for a reason —
+and a guessed artist or album is shown in italics rather than passed off as a
+tag. Tags are read in the background and cached in
+`~/.config/bgsoundtrack/tags.json`, so a listing never waits on a probe: the
+table fills in the moment the read lands, and says how many are left while it
+works.
+
+On a phone the artist, album and length columns fold away, leaving the track
+and its title.
 
 ## Export and import
 
@@ -275,7 +284,7 @@ one to drop a track. The player ignores non-audio files and dangling links.
 | `bgst playlist removed\|restore` | see and undo removals in this playlist |
 | `bgst export PATH [--bundle\|--format csv]` | write playlists out, with or without the audio |
 | `bgst import PATH` | read one back in as new playlists |
-| `bgst list --sort album` | order by name, title, artist or album |
+| `bgst list --sort album` | order by name, title, artist, album or length |
 | `bgst play --hidden` | play without ever showing gap lengths |
 | `bgst ui --stop\|--new` | stop the running control panel, or start a second |
 | `bgst unlink NAME...` | remove entries (only ever deletes symlinks, never real files) |
@@ -326,7 +335,9 @@ smear of rain sounds like a mistake.
 | `ambient_min_tail` | `3.0` | shortest gap worth filling with ambience |
 | `ambient_random_start` | `true` | drop into an ambient track at a random point |
 | `hide_gaps` | `false` | hidden mode: never show how long a gap runs |
-| `sort_by` | `name` | list and play order: name, title, artist or album |
+| `sort_by` | `name` | list and play order: name, title, artist, album or length |
+| `sort_desc` | `false` | reverse that order |
+| `show_filenames` | `true` | first column is the file on disk, not the title tag |
 | `volume` / `ambient_volume` | `70` / `45` | ambience sits under the music |
 | `shuffle` | `true` | shuffled passes; no repeat until all have played |
 | `loop` | `true` | start a new pass when the list is exhausted |

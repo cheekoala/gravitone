@@ -109,31 +109,53 @@
         <div class="panel-head">
           <h2>Music <span class="count" id="music-count">0</span></h2>
           <div class="head-tools">
-            <label class="sort-pick">
-              <select class="sort" data-sort-for="music"></select>
-              <svg viewBox="0 0 24 24" class="icon chev"><path d="M6 9l6 6 6-6"/></svg>
-            </label>
+            <label class="switch inline"><input type="checkbox" class="filenames"><span class="track"></span>File names</label>
             <button class="ghost small" data-goto="add">Add music</button>
           </div>
         </div>
         <p class="hint" id="music-tags" hidden></p>
-        <ul class="tracks" id="music-list"></ul>
+        <div class="table-wrap">
+          <table class="tracks" id="music-table">
+            <thead>
+              <tr>
+                <th class="col-no">#</th>
+                <th class="col-title" data-sort="title"><span></span></th>
+                <th class="col-artist" data-sort="artist"><span>Artist</span></th>
+                <th class="col-album" data-sort="album"><span>Album</span></th>
+                <th class="col-length" data-sort="length"><span>Length</span></th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody id="music-list"></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="panel" id="panel-ambient">
         <div class="panel-head">
           <h2>Ambient <span class="count" id="ambient-count">0</span></h2>
           <div class="head-tools">
-            <label class="sort-pick">
-              <select class="sort" data-sort-for="ambient"></select>
-              <svg viewBox="0 0 24 24" class="icon chev"><path d="M6 9l6 6 6-6"/></svg>
-            </label>
+            <label class="switch inline"><input type="checkbox" class="filenames"><span class="track"></span>File names</label>
             <button class="ghost small" data-goto="add">Add ambience</button>
           </div>
         </div>
         <p class="hint">Wind, rain, crickets, a tavern. Played under the gaps between songs.</p>
         <p class="hint" id="ambient-tags" hidden></p>
-        <ul class="tracks" id="ambient-list"></ul>
+        <div class="table-wrap">
+          <table class="tracks" id="ambient-table">
+            <thead>
+              <tr>
+                <th class="col-no">#</th>
+                <th class="col-title" data-sort="title"><span></span></th>
+                <th class="col-artist" data-sort="artist"><span>Artist</span></th>
+                <th class="col-album" data-sort="album"><span>Album</span></th>
+                <th class="col-length" data-sort="length"><span>Length</span></th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody id="ambient-list"></tbody>
+          </table>
+        </div>
       </section>
 
       <!-- ADD -->

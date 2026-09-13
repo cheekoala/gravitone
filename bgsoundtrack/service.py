@@ -60,6 +60,9 @@ class Session:
         self._runner: engine.Engine | None = None
         self._tags = tags.Reader(tags.cache_path(config_path))
         self._tags_pending = 0
+        # Bumped when a background read finishes, so the UI knows the table
+        # it is showing has been overtaken by real tags.
+        self._tags_version = 0
 
     # -- state -----------------------------------------------------------
 
@@ -80,6 +83,7 @@ class Session:
             "sort": self.config.sort_by,
             "sorts": list(library.SORTS),
             "tags_pending": self._tags_pending,
+            "tags_version": self._tags_version,
             "history": list(self._history[-12:]),
             "now": None if now is None else self._describe(now),
             "hidden": self.config.hide_gaps,
@@ -139,8 +143,9 @@ class Session:
         found = library.entries(
             self.config, section, self.playlist, reader=self._tags
         )
-        if self.config.sort_by != "name":
-            self._warm_tags([entry.target for entry in found])
+        # The table shows title, artist, album and length whatever the sort,
+        # so the real tags are always worth fetching in the background.
+        self._warm_tags([entry.target for entry in found])
         return {
             "section": section,
             "tracks": [
@@ -173,13 +178,13 @@ class Session:
 
     def _tag_fields(self, target: Path) -> dict:
         """Whatever we can say about a track without stopping to probe it."""
-        if self.config.sort_by == "name":
-            return {}
         known = self._tags.known(target)
         return {
             "title": known.title,
             "artist": known.artist,
             "album": known.album,
+            "track": known.track,
+            "duration": known.duration,
             "guessed": known.guessed,
         }
 
@@ -194,8 +199,13 @@ class Session:
             def progress(done, total):
                 self._tags_pending = max(0, total - done)
 
-            self._tags.read_all(waiting, progress)
+            read = self._tags.read_all(waiting, progress)
             self._tags_pending = 0
+            if read:
+                self._tags_version += 1
+        # Bumped when a background read finishes, so the UI knows the table
+        # it is showing has been overtaken by real tags.
+        self._tags_version = 0
 
         self._tag_thread = threading.Thread(target=work, daemon=True, name="bgst-tags")
         self._tag_thread.start()
