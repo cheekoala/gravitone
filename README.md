@@ -57,6 +57,10 @@ pipx install .          # or: pip install --user .
 The installer offers to add a menu entry and a desktop shortcut (`--shortcut`
 / `--no-shortcut` to decide up front; `-Shortcut` / `-NoShortcut` on Windows).
 
+When it offers to open the control panel at the end, it starts it **detached**
+(`setsid`), so the UI keeps running after that terminal window closes —
+logging to `~/.local/state/bgst/ui.log`.
+
 **Double-clicking `install.sh` in Dolphin, Nautilus or Thunar** used to look
 like nothing happened: a file manager runs an executable script with no
 terminal attached, so everything it prints goes to a pipe nobody reads, and
@@ -82,6 +86,12 @@ bgst ui                                    # the control panel, in your browser
 `bgsoundtrack/ui/index.html` from the folder by hand gives you a dead page —
 it has no server to talk to, so no library, no file browser, no playback. The
 page says so if you land there.
+
+Only one UI runs at a time: start it again (or click the shortcut again) and
+it opens the browser at the one already running instead of fighting it for the
+port. `bgst ui --stop` ends it, `bgst ui --new` starts a second one anyway. If
+port 8765 is taken by something else, it moves to the next free port and says
+so; with an explicit `--port` it reports the clash instead of moving.
 
 Or from the terminal:
 
@@ -210,6 +220,7 @@ one to drop a track. The player ignores non-audio files and dangling links.
 | `bgst playlist list\|new\|use\|rename\|remove` | switch between sets of music |
 | `bgst playlist removed\|restore` | see and undo removals in this playlist |
 | `bgst play --hidden` | play without ever showing gap lengths |
+| `bgst ui --stop\|--new` | stop the running control panel, or start a second |
 | `bgst unlink NAME...` | remove entries (only ever deletes symlinks, never real files) |
 | `bgst list --targets` | show the library and what each link points at |
 | `bgst prune` | drop links whose target moved or was deleted |
@@ -310,6 +321,22 @@ desktop's volume mixer shows one **bgst** entry to ride rather than a new
 
 If `pactl` is missing (a pure-ALSA box, macOS, Windows), a volume change
 applies from the next track and the UI says so.
+
+## When the shortcut seems to do nothing
+
+A desktop shortcut runs with no terminal, so anything printed is lost. bgst
+now puts failures on screen instead (kdialog, zenity, xmessage or a Tk dialog,
+whichever exists), including "running, but no browser opened — go to
+`http://…`". The three things that used to fail silently:
+
+| | |
+| --- | --- |
+| Port 8765 already taken | moves to the next free port, or says so with `--port` |
+| A UI already running | opens the browser at that one; `--stop` to end it |
+| Started from the installer, terminal closed | now launched detached, survives it |
+
+Its log, when started from the installer or a shortcut, is
+`~/.local/state/bgst/ui.log`.
 
 ## Tests
 

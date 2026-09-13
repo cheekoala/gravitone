@@ -2,8 +2,22 @@
 (() => {
   "use strict";
 
-  const TOKEN = location.hash.slice(1) || sessionStorage.getItem("bgst-token") || "";
-  if (TOKEN) sessionStorage.setItem("bgst-token", TOKEN);
+  // The token arrives in the URL fragment. Remember it for this origin so
+  // reopening the bare address (a bookmark, a restored tab) still works.
+  const remember = (value) => {
+    try {
+      if (value) localStorage.setItem("bgst-token", value);
+    } catch (err) { /* private window, blocked storage - not important */ }
+  };
+  const recall = () => {
+    try {
+      return localStorage.getItem("bgst-token") || "";
+    } catch (err) {
+      return "";
+    }
+  };
+  const TOKEN = location.hash.slice(1) || recall();
+  remember(TOKEN);
   // Opened as a file:// page there is no server to talk to, and no token.
   const SERVED = location.protocol === "http:" || location.protocol === "https:";
 
@@ -637,7 +651,11 @@
       if (!SERVED) {
         offline();
       } else if (++failures > 2) {
-        offline(`Cannot reach the bgst server (${err.message}). Is it still running?`);
+        offline(
+          /token/i.test(err.message)
+            ? "This page's key is out of date — open the link bgst printed, or run 'bgst ui' again."
+            : `Cannot reach the bgst server (${err.message}). Is it still running?`
+        );
       }
     }
   }

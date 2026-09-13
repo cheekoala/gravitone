@@ -1,11 +1,12 @@
 import json
+import os
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 import pytest
 
-from bgsoundtrack import library, picker, webui
+from bgsoundtrack import instance, library, picker, webui
 from bgsoundtrack.config import Config
 from bgsoundtrack.service import Session
 
@@ -251,3 +252,82 @@ def test_unknown_playlist_action_is_rejected(server):
     with pytest.raises(urllib.error.HTTPError) as caught:
         request(httpd, "/api/playlist", {"action": "explode"})
     assert caught.value.code == 400
+
+
+# -- starting up twice --------------------------------------------------
+
+
+def test_a_busy_port_moves_to_the_next_one(tmp_path):
+    """An older instance holding 8765 must not stop a new one starting."""
+    config = Config(root=str(tmp_path / "lib"))
+    library.init(config)
+    first = webui.serve(Session(config), host="127.0.0.1", port=0, open_browser=False)
+    try:
+        second = webui.serve(
+            Session(config),
+            host="127.0.0.1",
+            port=first.server_port,
+            open_browser=False,
+        )
+    finally:
+        pass
+    try:
+        assert second.server_port != first.server_port
+    finally:
+        first.shutdown()
+        second.shutdown()
+
+
+def test_an_explicit_busy_port_is_a_clear_error_not_a_traceback(tmp_path):
+    config = Config(root=str(tmp_path / "lib"))
+    library.init(config)
+    first = webui.serve(Session(config), host="127.0.0.1", port=0, open_browser=False)
+    try:
+        with pytest.raises(webui.PortInUse, match="already in use"):
+            webui.serve(
+                Session(config),
+                host="127.0.0.1",
+                port=first.server_port,
+                open_browser=False,
+                fallback=False,
+            )
+    finally:
+        first.shutdown()
+
+
+def test_a_running_instance_is_found_and_a_stale_note_is_cleared(tmp_path):
+    config_file = tmp_path / "config.json"
+    live = instance.Instance(
+        pid=os.getpid() + 1 if os.getpid() > 1 else 99999,
+        host="127.0.0.1",
+        port=9,          # nothing listens on discard
+        url="http://127.0.0.1:9/#x",
+        token="x",
+    )
+    instance.write(live, config_file)
+    assert instance.read(config_file).url == live.url
+    assert instance.running(config_file) is None          # not actually alive
+    assert not instance.state_path(config_file).exists()  # and the note is gone
+
+
+def test_the_note_points_at_a_real_server(tmp_path):
+    config = Config(root=str(tmp_path / "lib"))
+    library.init(config)
+    httpd = webui.serve(Session(config), host="127.0.0.1", port=0, open_browser=False)
+    config_file = tmp_path / "config.json"
+    try:
+        instance.write(
+            instance.Instance(
+                pid=os.getpid(),
+                host="127.0.0.1",
+                port=httpd.server_port,
+                url=httpd.url,
+                token=httpd.token,
+            ),
+            config_file,
+        )
+        found = instance.read(config_file)
+        assert instance.alive(found) is True
+        assert instance.state_path(config_file).stat().st_mode & 0o077 == 0  # token file
+    finally:
+        httpd.shutdown()

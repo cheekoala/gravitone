@@ -11,10 +11,15 @@ drive your player (or browse your disk).
 
 from __future__ import annotations
 
+import errno
 import json
 import mimetypes
+import os
 import secrets
+import signal
 import socket
+import sys
+import time
 import threading
 import webbrowser
 from http import HTTPStatus
@@ -25,7 +30,9 @@ from urllib.parse import parse_qs, urlparse
 from bgsoundtrack import (
     __version__,
     config as config_module,
+    instance as instance_state,
     library,
+    notify,
     player,
     playlists,
 )
@@ -277,18 +284,54 @@ def _lan_address() -> str | None:
         probe.close()
 
 
+DEFAULT_PORT = 8765
+PORT_TRIES = 12
+
+
+class PortInUse(OSError):
+    """The port asked for is taken, and we were told not to wander."""
+
+
+def _bind(host: str, port: int, handler, fallback: bool) -> ThreadingHTTPServer:
+    """Bind the port, or the next free one when we are allowed to move.
+
+    A port left busy by an earlier run used to surface as a bare
+    'Address already in use' traceback, which from a desktop shortcut meant
+    a window that never appeared.
+    """
+    last: OSError | None = None
+    for offset in range(PORT_TRIES if fallback else 1):
+        try:
+            return ThreadingHTTPServer((host, port + offset), handler)
+        except OSError as exc:
+            if exc.errno not in (errno.EADDRINUSE, errno.EACCES):
+                raise
+            last = exc
+    if not fallback:
+        raise PortInUse(
+            f"port {port} is already in use - something else (an older bgst?) "
+            f"is listening there"
+        ) from last
+    # Everything in the range is taken: let the OS pick anything free.
+    try:
+        return ThreadingHTTPServer((host, 0), handler)
+    except OSError as exc:
+        raise PortInUse(f"could not open a port on {host}: {exc}") from exc
+
+
 def serve(
     session: Session,
     host: str = "127.0.0.1",
-    port: int = 8765,
+    port: int = DEFAULT_PORT,
     token: str | None = None,
     open_browser: bool = True,
     verbose: bool = False,
+    fallback: bool = True,
 ) -> ThreadingHTTPServer:
     """Start the UI server. Returns it running on a background thread."""
     token = token or secrets.token_urlsafe(16)
     handler = type("BoundHandler", (Handler,), {"session": session, "token": token})
-    httpd = ThreadingHTTPServer((host, port), handler)
+    httpd = _bind(host, port, handler, fallback)
     httpd.verbose = verbose
     httpd.daemon_threads = True
     httpd.token = token
@@ -297,39 +340,118 @@ def serve(
     url = f"http://{shown_host}:{httpd.server_port}/#{token}"
     httpd.url = url
     threading.Thread(target=httpd.serve_forever, daemon=True, name="bgst-ui").start()
-    if open_browser:
-        webbrowser.open(url)
+    httpd.opened = webbrowser.open(url) if open_browser else False
     return httpd
 
 
 def run(
     config_path: Path | None = None,
     host: str = "127.0.0.1",
-    port: int = 8765,
+    port: int | None = None,
     open_browser: bool = True,
     root: str | None = None,
+    new: bool = False,
 ) -> int:
     """Blocking entry point used by `bgst ui`."""
+    wanted = DEFAULT_PORT if port is None else port
+
+    # Already running? Open that one instead of fighting it for the port.
+    if not new:
+        existing = instance_state.running(config_path)
+        if existing is not None:
+            print(f"bgst ui is already running  {existing.url}", flush=True)
+            if open_browser and not webbrowser.open(existing.url):
+                notify.complain(
+                    "bgst is already running",
+                    f"bgst is already running. Go to:\n\n{existing.url}",
+                )
+            print("use 'bgst ui --new' for a second one, or 'bgst ui --stop' to stop it")
+            return 0
+
     config = config_module.load(config_path)
     if root:
         config.root = root
     config.validate()
     library.init(config)
     session = Session(config, config_path)
-    httpd = serve(session, host=host, port=port, open_browser=open_browser)
 
-    print(f"bgst ui  {httpd.url}")
+    try:
+        httpd = serve(
+            session,
+            host=host,
+            port=wanted,
+            open_browser=open_browser,
+            fallback=port is None,
+        )
+    except PortInUse as exc:
+        notify.complain(
+            "bgst could not start",
+            f"{exc}.\n\nTry 'bgst ui' without --port, or 'bgst ui --stop' to stop "
+            f"the one that is running.",
+        )
+        return 1
+    except OSError as exc:
+        notify.complain("bgst could not start", f"could not start the UI: {exc}")
+        return 1
+
+    instance_state.write(
+        instance_state.Instance(
+            pid=os.getpid(),
+            host=host,
+            port=httpd.server_port,
+            url=httpd.url,
+            token=httpd.token,
+            started=time.time(),
+        ),
+        config_path,
+    )
+
+    if httpd.server_port != wanted:
+        print(f"port {wanted} was busy, using {httpd.server_port} instead", flush=True)
+    print(f"bgst ui  {httpd.url}", flush=True)
+    if open_browser and not httpd.opened:
+        # Launched from a shortcut with no browser handler, this is the
+        # difference between a link and a click that seems to do nothing.
+        notify.complain(
+            "bgst is running",
+            f"bgst is running, but no browser opened. Go to:\n\n{httpd.url}",
+        )
     if host in ("0.0.0.0", "::", ""):
         lan = _lan_address()
         if lan:
             print(f"phone    http://{lan}:{httpd.server_port}/#{httpd.token}")
         print("shared on your network - anyone with the link can control playback")
-    print("Ctrl-C to quit")
+    print("Ctrl-C to quit", flush=True)
+
+    stopping = threading.Event()
+    for name in ("SIGTERM", "SIGINT"):
+        handler = getattr(signal, name, None)
+        if handler is not None:
+            try:
+                signal.signal(handler, lambda *_: stopping.set())
+            except ValueError:  # pragma: no cover - not the main thread
+                pass
     try:
-        threading.Event().wait()
-    except KeyboardInterrupt:
-        print("\nstopping")
+        stopping.wait()
+    except KeyboardInterrupt:  # pragma: no cover - belt and braces
+        pass
     finally:
+        print("\nstopping")
         session.stop()
         httpd.shutdown()
+        instance_state.clear(config_path)
     return 0
+
+
+def stop(config_path: Path | None = None) -> int:
+    """`bgst ui --stop`: end the running UI, if there is one."""
+    existing = instance_state.running(config_path)
+    if existing is None:
+        print("no bgst ui is running")
+        return 0
+    if instance_state.stop(existing):
+        instance_state.clear(config_path)
+        print(f"stopped bgst ui on port {existing.port}")
+        return 0
+    print(f"could not stop the bgst ui on port {existing.port}", file=sys.stderr)
+    return 1

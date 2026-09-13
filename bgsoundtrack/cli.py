@@ -361,13 +361,16 @@ def cmd_ui(args) -> int:
 
     if args.pick:
         return _pick_source(args)
+    if args.stop:
+        return webui.stop(_config_path(args))
 
     return webui.run(
-        config_path=Path(args.config).expanduser() if args.config else None,
+        config_path=_config_path(args),
         host=args.host,
         port=args.port,
         open_browser=not args.no_browser,
         root=str(Path(args.root).expanduser()) if args.root else None,
+        new=args.new,
     )
 
 
@@ -549,7 +552,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="open the system folder chooser to add a source, then exit",
     )
-    p.add_argument("--port", type=int, default=8765)
+    p.add_argument(
+        "--port",
+        type=int,
+        help="port to serve on (default 8765, or the next free one)",
+    )
+    p.add_argument(
+        "--new", action="store_true", help="start another UI even if one is running"
+    )
+    p.add_argument("--stop", action="store_true", help="stop the running UI")
     p.add_argument(
         "--host",
         default="127.0.0.1",

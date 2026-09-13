@@ -179,6 +179,8 @@ install_shortcuts() {
   mkdir -p "$APPS"
   sed "s|Exec=bgst ui|Exec=$BIN/$APP ui|" "$SRC/packaging/bgst.desktop" > "$APPS/bgst.desktop"
   chmod +x "$APPS/bgst.desktop"
+  command -v update-desktop-database >/dev/null 2>&1 && \
+    update-desktop-database "$APPS" >/dev/null 2>&1 || true
   step "Added bgst to your application menu"
 
   DESKTOP_DIR=$( (command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP) || echo "$HOME/Desktop")
@@ -222,9 +224,25 @@ step "Done"
 if [ -t 0 ]; then
   printf 'Open the control panel now? [Y/n] '
   read -r reply
-  case "$reply" in [nN]*) ;; *) "$BIN/$APP" ui & sleep 1 ;; esac
+  case "$reply" in
+    [nN]*) ;;
+    *)
+      # Detached, or it dies with this terminal when the window closes -
+      # which looked exactly like "the control panel never opened".
+      LOG="${XDG_STATE_HOME:-$HOME/.local/state}/bgst"
+      mkdir -p "$LOG"
+      if command -v setsid >/dev/null 2>&1; then
+        setsid "$BIN/$APP" ui >"$LOG/ui.log" 2>&1 < /dev/null &
+      else
+        nohup "$BIN/$APP" ui >"$LOG/ui.log" 2>&1 < /dev/null &
+      fi
+      sleep 2
+      say "  started in the background - log: ${DIM}$LOG/ui.log${OFF}"
+      ;;
+  esac
 fi
 say ""
 say "  ${BOLD}bgst ui${OFF}                     open the control panel"
+say "  ${BOLD}bgst ui --stop${OFF}              stop it again"
 say "  ${BOLD}bgst link ~/Music/album${OFF}     add music (symlinks, no copies)"
 say "  ${BOLD}bgst play${OFF}                   play from the terminal"

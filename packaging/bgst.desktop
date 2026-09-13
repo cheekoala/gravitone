@@ -7,5 +7,5 @@ Exec=bgst ui
 Terminal=false
 Categories=AudioVideo;Audio;Player;
 Keywords=music;soundtrack;ambient;game;
-StartupNotify=false
+StartupNotify=true
 Icon=multimedia-audio-player
