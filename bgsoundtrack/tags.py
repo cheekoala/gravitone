@@ -22,7 +22,7 @@ from pathlib import Path
 
 from bgsoundtrack.config import config_path
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 PROBE_WORKERS = 8
 # "01 Title", "01 - Title", "01. Title", "12_Title" - but not "1984" on its own.
 _LEADING_NUMBER = re.compile(r"^\s*(\d{1,3})\s*(?:[-._)]\s*|\s+)")
@@ -34,6 +34,7 @@ class Tags:
     artist: str = ""
     album: str = ""
     track: int = 0
+    duration: float = 0.0
     guessed: bool = False   # nothing read; this came from the path
 
     def key(self, field: str) -> tuple:
@@ -42,6 +43,8 @@ class Tags:
         Unknowns sort last rather than clumping at the top, where they would
         look like the answer.
         """
+        if field == "length":
+            return (0 if self.duration else 1, f"{self.duration:012.3f}", self.title.lower())
         if field == "artist":
             first, rest = self.artist, (self.album, self.track, self.title)
         elif field == "album":
@@ -86,7 +89,9 @@ def _probe(path: Path) -> Tags | None:
             [
                 ffprobe,
                 "-v", "error",
-                "-show_entries", "format_tags=title,artist,album,album_artist,track"
+                "-show_entries",
+                "format=duration"
+                ":format_tags=title,artist,album,album_artist,track"
                 ":stream_tags=title,artist,album,album_artist,track",
                 "-of", "json",
                 str(path),
@@ -108,7 +113,11 @@ def _probe(path: Path) -> Tags | None:
     for block in [payload.get("format", {})] + list(payload.get("streams", [])):
         for name, value in (block.get("tags") or {}).items():
             found.setdefault(name.lower(), str(value))
-    if not found:
+    try:
+        duration = float(payload.get("format", {}).get("duration", 0) or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if not found and not duration:
         return None
 
     fallback = guess(path)
@@ -122,6 +131,7 @@ def _probe(path: Path) -> Tags | None:
         artist=found.get("artist") or found.get("album_artist") or "",
         album=found.get("album") or "",
         track=track,
+        duration=duration,
     )
 
 
@@ -181,6 +191,7 @@ class Reader:
             artist=entry.get("artist", ""),
             album=entry.get("album", ""),
             track=int(entry.get("track", 0) or 0),
+            duration=float(entry.get("duration", 0) or 0),
             guessed=bool(entry.get("guessed")),
         )
 
@@ -195,6 +206,7 @@ class Reader:
                 "artist": tags.artist,
                 "album": tags.album,
                 "track": tags.track,
+                "duration": tags.duration,
                 "guessed": tags.guessed,
             }
             self._dirty = True

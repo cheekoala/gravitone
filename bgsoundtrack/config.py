@@ -14,8 +14,8 @@ from pathlib import Path
 # The longest gap the UI offers: an hour of quiet between two songs.
 MAX_GAP = 3600.0
 
-# How a library can be ordered.
-SORTS = ("name", "title", "artist", "album")
+# How a library can be ordered - these are the table's sortable columns.
+SORTS = ("name", "title", "artist", "album", "length")
 
 MUSIC_DIRNAME = "music"
 AMBIENT_DIRNAME = "ambient"
@@ -82,9 +82,12 @@ class Config:
     # Hidden mode: never say how long a gap is or how much of it is left.
     # The wait is the point; a countdown ruins it.
     hide_gaps: bool = False
-    # How the library is listed, and the order it plays in with shuffle off:
-    # name, title, artist or album.
+    # How the library is listed, and the order it plays in with shuffle off.
     sort_by: str = "name"
+    sort_desc: bool = False
+    # Show the file on disk rather than the title tag. Some libraries are
+    # better named than they are tagged.
+    show_filenames: bool = True
 
     # Folders played in place. An alternative to linking: nothing is added to
     # the library folder, the tree is simply scanned every time it is needed,

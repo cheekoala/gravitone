@@ -333,3 +333,46 @@ def test_the_note_points_at_a_real_server(tmp_path):
         assert instance.state_path(config_file).stat().st_mode & 0o077 == 0  # token file
     finally:
         httpd.shutdown()
+
+
+# -- the table's data ---------------------------------------------------
+
+
+def test_the_library_carries_what_the_table_shows(server, tmp_path, monkeypatch):
+    from bgsoundtrack import tags
+
+    httpd, session, config, _ = server
+    album = tmp_path / "album"
+    make_audio(album, "01 Anchor.mp3")
+    request(httpd, "/api/source", {"path": str(album)})
+    session._tags.store(
+        album / "01 Anchor.mp3",
+        tags.Tags(title="Anchor", artist="Vela", album="Undertow", track=1, duration=35.0),
+    )
+
+    track = request(httpd, "/api/library?section=music")["tracks"][0]
+    assert track["title"] == "Anchor"
+    assert track["artist"] == "Vela"
+    assert track["album"] == "Undertow"
+    assert track["track"] == 1
+    assert track["duration"] == 35.0
+    assert track["guessed"] is False
+
+
+def test_sorting_and_direction_are_settings_the_ui_can_set(server):
+    httpd, *_ = server
+    state = request(httpd, "/api/config", {"sort_by": "album", "sort_desc": True})
+    assert state["sort"] == "album"
+    assert state["config"]["sort_desc"] is True
+    assert "length" in state["sorts"]
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        request(httpd, "/api/config", {"sort_by": "vibes"})
+    assert caught.value.code == 400
+
+
+def test_a_finished_tag_read_bumps_the_version(server, tmp_path):
+    httpd, session, *_ = server
+    before = request(httpd, "/api/state")["tags_version"]
+    session._tags_version += 1          # what the background reader does
+    assert request(httpd, "/api/state")["tags_version"] == before + 1

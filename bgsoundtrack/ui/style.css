@@ -207,26 +207,80 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
 }
 .history li.empty, .tracks li.empty { color: var(--faint); letter-spacing: 0; }
 
-/* -- lists --------------------------------------------------------- */
-.tracks, .browser { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.tracks li, .browser li {
+/* -- track table --------------------------------------------------- */
+.table-wrap {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); overflow-x: auto;
+}
+table.tracks { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.tracks th, table.tracks td {
+  text-align: left; padding: 7px 10px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+table.tracks thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: #141417; border-bottom: 1px solid var(--line);
+  font: 10.5px/1.6 var(--mono); text-transform: uppercase; letter-spacing: .08em;
+  color: var(--faint); font-weight: 500; user-select: none;
+}
+table.tracks thead th[data-sort] { cursor: pointer; }
+table.tracks thead th[data-sort]:hover { color: var(--text); }
+table.tracks thead th[data-sort] span::after {
+  content: ""; display: inline-block; width: 0; height: 0; margin-left: 6px;
+  vertical-align: middle; border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent; opacity: 0;
+}
+table.tracks thead th.sorted { color: #d9ccff; }
+table.tracks thead th.sorted span::after { opacity: 1; border-bottom: 4px solid currentColor; }
+table.tracks thead th.sorted.desc span::after {
+  border-bottom: none; border-top: 4px solid currentColor;
+}
+
+table.tracks tbody tr { border-bottom: 1px solid var(--line-soft); }
+table.tracks tbody tr:last-child { border-bottom: none; }
+table.tracks tbody tr:nth-child(even) { background: rgba(255,255,255,.015); }
+table.tracks tbody tr:hover { background: #17171b; }
+table.tracks tbody tr.playing { background: rgba(124,58,237,.12); box-shadow: inset 2px 0 0 var(--select); }
+table.tracks tbody tr.playing .t-title { color: #d9ccff; }
+table.tracks tbody tr.broken .t-title { color: #ff9ea1; }
+table.tracks tbody tr.empty td { color: var(--faint); padding: 16px 10px; white-space: normal; }
+
+.col-no { width: 44px; text-align: right !important; }
+td.col-no { font: 11px/1 var(--mono); color: var(--faint); text-align: right; }
+.col-title { width: 40%; }
+.col-artist, .col-album { width: 22%; color: var(--muted); }
+.col-length { width: 70px; text-align: right !important; }
+td.col-length { font: 11px/1 var(--mono); color: var(--faint); }
+.col-actions { width: 74px; }
+td.col-actions { text-align: right; padding-right: 8px; }
+.t-title { color: var(--text); }
+td.guessed { color: var(--faint); font-style: italic; }
+.t-sub { font: 10.5px/1.4 var(--mono); color: var(--faint); }
+/* The origin marker matters when you press ✕, not while you are reading
+   the list, so it keeps quiet until the row is under the cursor. */
+td .tag { margin-right: 4px; opacity: .3; transition: opacity .12s; }
+table.tracks tbody tr:hover td .tag, table.tracks tbody tr.playing td .tag { opacity: 1; }
+.t-remove {
+  background: none; border: none; color: var(--faint); padding: 3px 5px; border-radius: 6px;
+}
+.t-remove:hover { color: var(--danger); background: rgba(229,72,77,.1); }
+.switch.inline { margin-bottom: 0; font-size: 12.5px; }
+.switch.inline .track { width: 30px; height: 18px; }
+.switch.inline .track::after { width: 12px; height: 12px; }
+.switch.inline input:checked + .track::after { transform: translateX(12px); }
+
+/* -- browser ------------------------------------------------------- */
+.browser { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.browser li {
   display: flex; align-items: center; gap: 10px; min-width: 0;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
 }
-.tracks li.playing { border-color: rgba(124,58,237,.5); background: rgba(124,58,237,.09); }
-.tracks li.broken { border-color: rgba(229,72,77,.4); }
 .t-body { min-width: 0; flex: 1; }
 .t-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .t-target {
   font: 10.5px/1.5 var(--mono); letter-spacing: .02em; color: var(--faint);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.t-remove {
-  background: none; border: none; color: var(--faint); padding: 4px 6px; border-radius: 6px; flex: none;
-}
-.t-remove:hover { color: var(--danger); background: rgba(229,72,77,.1); }
-
-/* -- browser ------------------------------------------------------- */
 .shortcuts { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px;
@@ -339,7 +393,27 @@ input[type="range"]::-moz-range-thumb {
 [hidden] { display: none !important; }
 
 /* -- small screens ------------------------------------------------- */
+@media (max-width: 760px) {
+  .col-artist, .col-album { display: none; }
+}
+
+@media (hover: none) {
+  td .tag { opacity: 1; }   /* no cursor to hover with */
+}
+
 @media (max-width: 620px) {
+  .col-length { display: none; }
+  /* Keep the top bar on one line: the path goes, the playlist name shortens,
+     and Ban keeps its icon but drops its label. */
+  .brand-sub { display: none; }
+  .brand-name { display: none; }
+  .playlist-pick select { max-width: 150px; }
+  .topbar { padding: 8px 10px; gap: 8px; }
+  .topbar-actions { gap: 6px; }
+  .ban span { display: none; }
+  .live { padding: 7px 12px; }
+  table.tracks th, table.tracks td { padding: 7px 8px; }
+  .head-tools { gap: 6px; }
   .body { flex-direction: column-reverse; }
   .rail {
     width: auto; flex-direction: row; justify-content: space-around;
