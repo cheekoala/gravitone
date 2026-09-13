@@ -105,10 +105,10 @@ def cmd_playlist(args) -> int:
         for item in store.playlists:
             mark = "*" if item.id == store.active else " "
             counts = library.entries(config, "music", item)
+            folders = len(item.music_sources) + len(item.ambient_sources)
             print(
                 f" {mark} {item.name}  [{item.id}]  {len(counts)} music, "
-                f"{len(item.music_sources) + len(item.ambient_sources)} source(s), "
-                f"{len(item.excluded)} removed"
+                f"{folders} folder(s), {len(item.excluded)} removed"
             )
         return 0
 
@@ -129,7 +129,7 @@ def cmd_playlist(args) -> int:
         store.save()
         print(f"created playlist {created.name} [{created.id}]")
         if args.source:
-            print(f"  source {Path(args.source).expanduser().resolve()}")
+            print(f"  plays {Path(args.source).expanduser().resolve()}")
         if args.use:
             print("  selected")
         return 0
