@@ -38,6 +38,17 @@ INDEX_VERSION = 2
 # The attached_pic disposition is the usual marker, but not every container
 # and tagger sets it, and a picture is a picture.
 IMAGE_CODECS = {"mjpeg", "png", "bmp", "gif", "webp", "tiff", "jpeg2000"}
+# What the bytes themselves say they are. Taggers get the declared type wrong
+# often enough - a JPEG filed as image/png is common - and a decoder picked
+# from the label then refuses a picture that is perfectly fine.
+SIGNATURES = (
+    (b"\xff\xd8\xff", ".jpg"),
+    (b"\x89PNG\r\n\x1a\n", ".png"),
+    (b"GIF87a", ".gif"),
+    (b"GIF89a", ".gif"),
+    (b"BM", ".bmp"),
+)
+SUFFIXES = (".jpg", ".png", ".gif", ".bmp", ".webp")
 
 
 def cache_dir(config_file: Path | None = None) -> Path:
@@ -121,7 +132,7 @@ class Art:
         with self._lock:
             if key in self._known:
                 return self._known[key]
-        for suffix in (".jpg", ".png"):
+        for suffix in SUFFIXES:
             candidate = self.directory / f"{key}{suffix}"
             if candidate.exists():
                 with self._lock:
@@ -222,7 +233,87 @@ class Art:
                 self.remember(owner, None)
             return None
         self.directory.mkdir(parents=True, exist_ok=True)
-        target = self.directory / f"{self._key(owner)}.jpg"
+        key = self._key(owner)
+        cover = self._copy_picture(ffmpeg, path, key) or self._decode_picture(
+            ffmpeg, path, key
+        )
+        if cover is None:
+            if remember_failure:
+                self.remember(owner, None)   # asked and answered
+            return None
+        self.remember(owner, cover)
+        return cover
+
+    def _copy_picture(self, ffmpeg: str, path: Path, key: str) -> Path | None:
+        """Lift the picture out byte for byte, and believe the bytes.
+
+        Decoding it means trusting the type the tagger wrote down, and a
+        JPEG labelled image/png - which happens a lot - then fails to decode
+        at all. Copying the stream asks no questions; the format is read off
+        the bytes afterwards, and the picture is shrunk from the file we now
+        hold rather than from the label.
+        """
+        raw = self.directory / f"{key}.raw"
+        try:
+            done = subprocess.run(
+                [
+                    ffmpeg, "-v", "error", "-y",
+                    "-i", str(path),
+                    "-an", "-map", "0:v:0", "-c", "copy", "-f", "image2",
+                    str(raw),
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            raw.unlink(missing_ok=True)
+            return None
+        suffix = self._sniff(raw) if done.returncode == 0 else None
+        if suffix is None:
+            raw.unlink(missing_ok=True)
+            return None
+        shrunk = self._shrink(ffmpeg, raw, key)
+        if shrunk is not None:
+            raw.unlink(missing_ok=True)
+            return shrunk
+        target = self.directory / f"{key}{suffix}"
+        try:
+            raw.replace(target)
+        except OSError:
+            raw.unlink(missing_ok=True)
+            return None
+        return target
+
+    def _shrink(self, ffmpeg: str, source: Path, key: str) -> Path | None:
+        """A screen-sized JPEG of a picture we already hold as a file.
+
+        ffmpeg reads the real format off this one, so art whose declared type
+        was wrong gets resized like any other.
+        """
+        target = self.directory / f"{key}.jpg"
+        try:
+            done = subprocess.run(
+                [
+                    ffmpeg, "-v", "error", "-y",
+                    "-i", str(source),
+                    "-frames:v", "1",
+                    "-vf", "scale=min(600\\,iw):-1",
+                    str(target),
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            target.unlink(missing_ok=True)
+            return None
+        if done.returncode != 0 or not target.exists() or target.stat().st_size == 0:
+            target.unlink(missing_ok=True)
+            return None
+        return target
+
+    def _decode_picture(self, ffmpeg: str, path: Path, key: str) -> Path | None:
+        """The straight read, for a picture that will not copy out whole."""
+        target = self.directory / f"{key}.jpg"
         try:
             done = subprocess.run(
                 [
@@ -236,14 +327,29 @@ class Art:
                 timeout=30,
             )
         except (OSError, subprocess.SubprocessError):
+            target.unlink(missing_ok=True)
             return None
         if done.returncode != 0 or not target.exists() or target.stat().st_size == 0:
             target.unlink(missing_ok=True)
-            if remember_failure:
-                self.remember(owner, None)   # asked and answered
             return None
-        self.remember(owner, target)
         return target
+
+    @staticmethod
+    def _sniff(path: Path) -> str | None:
+        """What a file really is, from its first bytes."""
+        try:
+            with path.open("rb") as handle:
+                head = handle.read(16)
+        except OSError:
+            return None
+        if not head:
+            return None
+        if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+            return ".webp"
+        for magic, suffix in SIGNATURES:
+            if head.startswith(magic):
+                return suffix
+        return None
 
     def want(self, path: Path) -> None:
         """Find it in the background - for the track that just started."""
@@ -338,8 +444,9 @@ class Art:
         # belong to, and looking again is exactly when that grouping may be
         # about to change - a stale one would be served straight back.
         try:
-            for stale in self.directory.glob("*.jpg"):
-                stale.unlink(missing_ok=True)
+            for stale in self.directory.iterdir():
+                if stale.suffix in SUFFIXES or stale.suffix == ".raw":
+                    stale.unlink(missing_ok=True)
         except OSError:
             pass
         self.save()

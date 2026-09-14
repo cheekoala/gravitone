@@ -255,6 +255,12 @@ six coverless tracks at the top of the folder hid the art on the rest. Tracks
 are grouped by what their album tag says, and only the tracks of that album
 are read looking for its picture.
 
+The picture is lifted out byte for byte and the format read off the bytes,
+not off the type the tagger wrote down. A JPEG filed as `image/png` is
+common, and decoding it by the label fails outright — the wrong decoder is
+picked and refuses a picture that is perfectly good. It is shrunk to 600px
+afterwards, from the file rather than from the label.
+
 Before running ffmpeg at all, the file's header is checked for an attached
 picture: 45 ms to ask versus about 3 s for ffmpeg to scan a whole file and
 find nothing.
