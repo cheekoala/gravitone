@@ -247,17 +247,25 @@ Plenty of rips carry the picture on one track and not the rest, so a record
 is read across its first few files before it is called coverless. Both
 answers — the cover and the "there is none" — are written to
 `~/.config/bgsoundtrack/covers/index.json`, so a restart asks nothing again.
+
+**A record is a folder and an album tag, not a folder.** Keeping a whole
+game's music in one directory is normal, and one answer per directory meant
+whichever album happened to be listed first decided for everything below it:
+six coverless tracks at the top of the folder hid the art on the rest. Tracks
+are grouped by what their album tag says, and only the tracks of that album
+are read looking for its picture.
+
 Before running ffmpeg at all, the file's header is checked for an attached
 picture: 45 ms to ask versus about 3 s for ffmpeg to scan a whole file and
 find nothing.
 
-**Config → Find album art** reads the records nobody has asked about yet;
-**Look again** re-reads everything, for after you have added art to files.
-`bgst doctor` says how many records have art and how many are known not to. The current track shows
-its cover in Now, and the table shows thumbnails for what has been found.
-**Config → Find album art** goes looking for the whole playlist in the
-background; art is cached in `~/.config/bgsoundtrack/covers/`, one per folder,
-since a record shares its cover.
+**Config → Find album art** goes through the playlist in the background,
+reading the records nobody has asked about yet; **Look again** throws every
+answer away and re-reads the lot, for after you have added art to files. It
+reads the tags first, since they are what says where one record ends and the
+next begins. Art is cached in `~/.config/bgsoundtrack/covers/`, one file per
+record, since a record shares its cover, and `bgst doctor` says how many
+records have art and how many are known not to.
 
 A cover is fetched **once per record, not once per track**, and served with
 an ETag and a week of cache headers. The token the page uses is kept in

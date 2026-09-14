@@ -69,7 +69,9 @@ class Session:
         self._tags_version = 0
         self._counts: tuple | None = None   # memo, keyed by what can change it
         self._album_map: tuple | None = None
-        self._art = art_module.Art(art_module.cache_dir(self.config_path))
+        self._art = art_module.Art(
+            art_module.cache_dir(self.config_path), reader=self._tags
+        )
         self._art_pending = 0
         self._started = time.time()
         self._started = time.time()
@@ -284,7 +286,9 @@ class Session:
         self._tags_version = 0
         self._counts: tuple | None = None   # memo, keyed by what can change it
         self._album_map: tuple | None = None
-        self._art = art_module.Art(art_module.cache_dir(self.config_path))
+        self._art = art_module.Art(
+            art_module.cache_dir(self.config_path), reader=self._tags
+        )
         self._art_pending = 0
         self._started = time.time()
         self._started = time.time()
@@ -531,6 +535,9 @@ class Session:
             library.SCANNER.version,
             self.playlist.id,
             len(self.playlist.excluded),
+            # Which record a track belongs to is an album tag, so a tag that
+            # has just been read can move it to a different one.
+            self._tags_version,
         )
         if getattr(self, "_album_map", None) and self._album_map[0] == key:
             return self._album_map[1]
@@ -560,36 +567,76 @@ class Session:
 
     def find_covers(self) -> int:
         """Go looking for art for everything in this playlist, in the
-        background. Returns how many tracks it will look at."""
-        # One record, one look: count albums, not tracks, or the progress
-        # reads like thousands of jobs when it is a few dozen.
-        wanted = []
-        seen = set()
-        for section in library.SECTIONS:
-            for entry in library.entries(self.config, section, self.playlist):
-                folder = str(self._art.real(entry.target).parent)
-                if folder in seen or self._art.answered(entry.target)[0]:
-                    continue
-                seen.add(folder)
-                wanted.append(entry.target)
-        if not wanted or self._art_pending:
+        background. Returns how many tracks it has to work through; that
+        falls to one job per record as soon as their tags are known.
+        """
+        if self._art_pending:
             return 0
-        self._art_pending = len(wanted)
+        tracks = [
+            entry.target
+            for section in library.SECTIONS
+            for entry in library.entries(self.config, section, self.playlist)
+        ]
+        # A track whose tags are unread has no known record yet, so it counts
+        # as a job of its own until they are read; everything else is one job
+        # per record, and records already answered are no job at all.
+        unread = set(self._tags.pending(tracks))
+        wanted, seen = [], set()
+        for path in tracks:
+            unknown = path in unread
+            key = str(path) if unknown else self._art.album_key(path)
+            if key in seen or (not unknown and self._art.answered(path)[0]):
+                continue
+            seen.add(key)
+            wanted.append(path)
+        if not wanted:
+            return 0
 
         def work() -> None:
-            found = 0
-            for path in wanted:
-                if self._art.find(path):
-                    found += 1
-                    if found % 5 == 0:
-                        # Let the thumbnails appear as they are found.
-                        self._art.save()
-                        self._tags_version += 1
-                self._art_pending = max(0, self._art_pending - 1)
-            self._art_pending = 0
-            self._art.save()
-            self._tags_version += 1      # the table has new thumbnails
+            try:
+                # Which record a track belongs to is an album tag, so read the
+                # tags before grouping - otherwise a folder holding several
+                # albums looks like one record and answers as one.
+                todo = self._tags.pending(tracks)
+                if todo:
+                    self._art_pending = len(todo)
+                    self._tags.read_all(
+                        todo,
+                        on_progress=lambda done, total: setattr(
+                            self, "_art_pending", max(1, total - done)
+                        ),
+                    )
+                    self._tags.save()
+                    self._tags.forget_memo()
+                wanted, seen = [], set()
+                for path in tracks:
+                    record = self._art.album_key(path)
+                    if record in seen or self._art.answered(path)[0]:
+                        continue
+                    seen.add(record)
+                    wanted.append(path)
+                self._art_pending = len(wanted)
+                found = 0
+                for path in wanted:
+                    try:
+                        hit = self._art.find(path)
+                    except Exception:
+                        hit = None      # one unreadable file is not the scan
+                    if hit:
+                        found += 1
+                        if found % 5 == 0:
+                            # Let the thumbnails appear as they are found.
+                            self._art.save()
+                            self._tags_version += 1
+                    self._art_pending = max(0, self._art_pending - 1)
+            finally:
+                # Whatever happened, the scan is over: leaving this set would
+                # turn every later "find art" into a silent no-op.
+                self._art_pending = 0
+                self._art.save()
+                self._tags_version += 1      # the table has new thumbnails
 
+        self._art_pending = len(wanted)
         threading.Thread(target=work, daemon=True, name="bgst-art-scan").start()
         return len(wanted)
 
