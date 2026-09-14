@@ -359,6 +359,16 @@ def cmd_doctor(args) -> int:
 
     probe = shutil.which("ffprobe")
     print(f"tags & lengths  {'ffprobe' if probe else 'NO ffprobe - no titles or lengths'}")
+
+    from bgsoundtrack import art as art_module
+
+    covers = art_module.Art(art_module.cache_dir(_config_path(args)))
+    remembered = covers.remembered()
+    with_art = sum(1 for cover in remembered.values() if cover)
+    print(
+        f"album art       {with_art} record(s) with art, "
+        f"{len(remembered) - with_art} known to have none"
+    )
     if instance.process_is_stale():
         print(
             "update pending   bgst was installed again after this command's "
@@ -491,7 +501,10 @@ def cmd_play(args) -> int:
     reader = tag_reader.Reader()
 
     def label(path: Path) -> str:
-        known = reader.known(path)
+        try:
+            known = reader.known(path.resolve())   # a link's tags are the file's
+        except OSError:
+            known = reader.known(path)
         if known.guessed or not known.title:
             return path.name
         return f"{known.title} — {known.artist}" if known.artist else known.title

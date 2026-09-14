@@ -138,7 +138,11 @@ thousands of nodes in the DOM. *Show all* is there when you want it.
 
 Anything in flight shows a thin sweeping bar across the top of the window,
 and buttons that take a moment (exporting a bundle, finding art) spin while
-they work.
+they work. A library that takes a second to arrive shows pulsing placeholder
+rows rather than an empty table, and cover cells pulse while art is being
+read.
+
+![Placeholder rows while a large library loads](docs/ui-loading.png)
 
 ## Server controls
 
@@ -167,8 +171,10 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 | ![Adding: a whole folder, or just the files in it](docs/ui-add.png) | |
 
 - **Top bar** — the playlist selector; switching it switches what plays.
-- **Now** — what is playing (named from its tags, with the album cover when
-  there is one) or how long the current gap runs, with history.
+- **Now** — what is playing, named from its tags (`Anchor — Vela`, with the
+  album underneath and the cover beside it) or how long the current gap runs,
+  with history. Tags for the playing track are read on the spot, so this
+  works whether or not you have opened the library table.
 - **Music / Ambient** — the two libraries; `✕` removes a link, never a file.
 - **Add** — *Choose a folder…* opens your desktop's own folder dialog (needs
   Tk; `bgst doctor` says whether you have it). Otherwise browse from the
@@ -229,8 +235,21 @@ to read, back up, or edit by hand.
 
 ## Album art
 
-Covers come from the picture inside the file (extracted once with ffmpeg) or
-from a `cover.jpg` / `folder.jpg` sitting beside it. The current track shows
+Covers come from **the picture inside the file**, and only from there — a
+`cover.jpg` lying in the folder is someone else's idea of what the record
+looks like, so it is ignored. Tag the files and bgst will find it.
+
+Plenty of rips carry the picture on one track and not the rest, so a record
+is read across its first few files before it is called coverless. Both
+answers — the cover and the "there is none" — are written to
+`~/.config/bgsoundtrack/covers/index.json`, so a restart asks nothing again.
+Before running ffmpeg at all, the file's header is checked for an attached
+picture: 45 ms to ask versus about 3 s for ffmpeg to scan a whole file and
+find nothing.
+
+**Config → Find album art** reads the records nobody has asked about yet;
+**Look again** re-reads everything, for after you have added art to files.
+`bgst doctor` says how many records have art and how many are known not to. The current track shows
 its cover in Now, and the table shows thumbnails for what has been found.
 **Config → Find album art** goes looking for the whole playlist in the
 background; art is cached in `~/.config/bgsoundtrack/covers/`, one per folder,

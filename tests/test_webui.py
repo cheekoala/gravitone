@@ -1,6 +1,8 @@
 import json
 import os
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -433,7 +435,9 @@ def test_a_cover_is_served_only_for_a_track_in_the_library(server, tmp_path):
     httpd, session, config, _ = server
     album = tmp_path / "album"
     make_audio(album, "one.mp3")
-    (album / "folder.jpg").write_bytes(b"\xff\xd8\xffcover-bytes")
+    cover = tmp_path / "extracted.jpg"
+    cover.write_bytes(b"\xff\xd8\xffcover-bytes")
+    session._art.remember(album, cover)
     request(httpd, "/api/source", {"path": str(album)})
 
     url = f"http://127.0.0.1:{httpd.server_port}/api/cover?track={album / 'one.mp3'}&t={httpd.token}"
@@ -499,3 +503,84 @@ def test_state_reports_what_the_server_is_doing(server):
     state = request(httpd, "/api/state")
     for key in ("pid", "started", "indexing", "tags_pending", "art_pending", "version"):
         assert key in state
+
+
+def test_a_linked_track_shows_its_own_tags_and_art(server, tmp_path):
+    """A link plays by its own path; its tags and cover belong to the file."""
+    from bgsoundtrack import engine, library, tags
+
+    httpd, session, config, _ = server
+    real = tmp_path / "Artist" / "Album" / "01 Song.mp3"
+    real.parent.mkdir(parents=True)
+    real.write_bytes(b"\0")
+    cover = tmp_path / "cover-from-the-file.jpg"
+    cover.write_bytes(b"\xff\xd8\xffart")
+    session._art.remember(real.parent, cover)      # as extraction would
+    session._tags.store(real, tags.Tags(title="Song", artist="Artist", album="Album"))
+    library.link(config, [real], playlist=session.playlist)
+
+    link = config.music_dir / "01 Song.mp3"
+    assert link.is_symlink() and link != real
+    session._on_event(engine.Event("track", path=link))
+
+    now = request(httpd, "/api/state")["now"]
+    assert now["label"] == "Song — Artist"
+    assert now["album"] == "Album"
+    assert now["art"] is True      # the album's cover, not the library folder's
+
+
+def test_the_playing_track_gets_read_without_opening_the_table(server, tmp_path, monkeypatch):
+    from bgsoundtrack import engine, tags
+
+    httpd, session, *_ = server
+    song = tmp_path / "album" / "01 Song.mp3"
+    song.parent.mkdir(parents=True)
+    song.write_bytes(b"\0")
+    monkeypatch.setattr(
+        tags, "_probe", lambda path: tags.Tags(title="Song", artist="Artist")
+    )
+
+    assert session._tags.cached(song) is None       # nothing known yet
+    session._on_event(engine.Event("track", path=song))
+    for _ in range(50):
+        if session._tags.cached(song) is not None:
+            break
+        time.sleep(0.05)
+    assert request(httpd, "/api/state")["now"]["label"] == "Song — Artist"
+
+
+def test_a_cover_can_be_asked_for_by_the_link_or_the_file(server, tmp_path):
+    from bgsoundtrack import library
+
+    httpd, session, config, _ = server
+    real = tmp_path / "Artist" / "Album" / "song.mp3"
+    real.parent.mkdir(parents=True)
+    real.write_bytes(b"\0")
+    cover = tmp_path / "extracted.jpg"
+    cover.write_bytes(b"\xff\xd8\xffart")
+    session._art.remember(real.parent, cover)
+    library.link(config, [real], playlist=session.playlist)
+    link = config.music_dir / "song.mp3"
+
+    for asked in (real, link):
+        url = (
+            f"http://127.0.0.1:{httpd.server_port}/api/cover"
+            f"?track={urllib.parse.quote(str(asked))}&t={httpd.token}"
+        )
+        with urllib.request.urlopen(url, timeout=5) as response:
+            assert response.read().endswith(b"art")
+
+
+def test_history_catches_up_when_tags_arrive(server, tmp_path):
+    from bgsoundtrack import engine, tags
+
+    httpd, session, *_ = server
+    song = tmp_path / "album" / "01 Song.mp3"
+    song.parent.mkdir(parents=True)
+    song.write_bytes(b"\0")
+
+    session._on_event(engine.Event("track", path=song))
+    assert request(httpd, "/api/state")["history"] == ["01 Song.mp3"]
+
+    session._tags.store(song, tags.Tags(title="Song", artist="Artist"))
+    assert request(httpd, "/api/state")["history"] == ["Song — Artist"]
