@@ -266,7 +266,7 @@
 
   function renderCover(now) {
     const holder = $("now-cover");
-    const wanted = now && now.art ? now.name : null;
+    const wanted = now && now.art ? (now.album_id || now.name) : null;
     if (wanted === coverShown) return;
     coverShown = wanted;
     if (!wanted) {
@@ -285,9 +285,13 @@
     holder.className = "cover-holder";
   }
 
+  // One URL per record: every track of an album shares it, so the browser
+  // fetches it once and keeps it (the token no longer changes on restart).
   const coverUrl = (track) =>
-    `/api/cover?track=${encodeURIComponent(track.path || track.target || "")}`
-    + `&t=${encodeURIComponent(TOKEN)}`;
+    track.album_id
+      ? `/api/cover?album=${encodeURIComponent(track.album_id)}&t=${encodeURIComponent(TOKEN)}`
+      : `/api/cover?track=${encodeURIComponent(track.path || track.target || "")}`
+        + `&t=${encodeURIComponent(TOKEN)}`;
 
   function renderPlaylistPicker(next) {
     const picker = $("playlist-select");
@@ -425,12 +429,62 @@
     }
   }
 
+  const lastShape = { music: "", ambient: "" };
+  // Where each panel was left, so switching away and back - or a refresh
+  // while covers arrive - does not send you somewhere else.
+  const scrollMemory = { music: 0, ambient: 0, now: 0, add: 0, settings: 0 };
+
+  function rememberScroll() {
+    const stage = document.querySelector(".stage");
+    if (stage) scrollMemory[panel] = stage.scrollTop;
+  }
+
+  function restoreScroll(name) {
+    const stage = document.querySelector(".stage");
+    if (!stage || !scrollMemory[name]) return;
+    // After layout, or the list is still short and the value gets clamped.
+    requestAnimationFrame(() => {
+      if (panel === name) stage.scrollTop = scrollMemory[name];
+    });
+  }
+
   function renderLibrary(name) {
     const body = $(`${name}-list`);
     const data = libraries[name];
     if (!data) return;                       // not fetched yet
     const broken = data.broken || [];
     const showFiles = state.config.show_filenames;
+
+    const needle = filters[name].trim().toLowerCase();
+    // Every word has to appear somewhere in the track: "vela anch" finds it.
+    const words = needle ? needle.split(/\s+/) : [];
+    const matches = words.length
+      ? data.tracks.filter((track) => {
+          const hay = [track.name, track.title, track.artist, track.album, track.target]
+            .filter(Boolean).join(" ").toLowerCase();
+          return words.every((word) => hay.includes(word));
+        })
+      : data.tracks;
+    const found = $(`${name}-found`);
+    if (found) {
+      found.hidden = !words.length;
+      found.textContent = `${matches.length} of ${data.tracks.length}`;
+    }
+    const shown = matches.slice(0, limits[name]);
+
+    // Same tracks, same order? Then update the cells that changed and leave
+    // the rows alone - rebuilding throws away the scroll position, which is
+    // what made the view jump every time tags or covers arrived.
+    const shape = `${needle}|${limits[name]}|${showFiles}|`
+      + shown.map((track) => track.target).join("\u0000");
+    if (shape === lastShape[name] && body.children.length >= shown.length) {
+      shown.forEach((track, index) => patchRow(body.children[index], track, name));
+      return;
+    }
+
+    const narrowing = lastShape[name].split("|")[0] !== needle;
+    if (narrowing) scrollMemory[name] = 0;      // a new search starts at the top
+    lastShape[name] = shape;
     body.replaceChildren();
 
     if (!data.tracks.length && !broken.length) {
@@ -445,17 +499,7 @@
     }
 
     const playing = state.now && state.now.name;
-    const needle = filters[name].trim().toLowerCase();
-    const matches = needle
-      ? data.tracks.filter((track) =>
-          [track.name, track.title, track.artist, track.album]
-            .filter(Boolean)
-            .some((field) => field.toLowerCase().includes(needle)))
-      : data.tracks;
-    // A library of thousands would put tens of thousands of nodes in the
-    // page and make every interaction sticky, so only a window is built -
-    // the filter box is how you reach the rest.
-    const shown = matches.slice(0, limits[name]);
+    // Big libraries go in one chunk per frame, so the tab never locks up.
     const CHUNK = 150;
     const build = (track) => {
       const row = el("tr", track.name === playing && state.running ? "playing" : null);
@@ -476,7 +520,6 @@
       title.title = track.target;
       row.append(title);
 
-      // A guess read off the path is shown, but never dressed up as a tag.
       const artist = el("td", "col-artist", track.artist || "—");
       const album = el("td", "col-album", track.album || "—");
       artist.title = track.artist || "";
@@ -491,8 +534,6 @@
 
       const actions = el("td", "col-actions");
       if (track.origin === "source") {
-        // An icon, not a word: the column is narrow and the meaning only
-        // matters when you are about to press ✕ next to it.
         const mark = el("span", "origin");
         mark.innerHTML = '<svg viewBox="0 0 24 24" class="icon">'
           + '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
@@ -509,49 +550,48 @@
       return row;
     };
 
-    const rows = shown;
     const paint = (from) => {
       const fragment = document.createDocumentFragment();
-      for (let i = from; i < Math.min(from + CHUNK, rows.length); i += 1) {
-        fragment.append(build(rows[i]));
+      for (let i = from; i < Math.min(from + CHUNK, shown.length); i += 1) {
+        fragment.append(build(shown[i]));
       }
       body.append(fragment);
-      if (from + CHUNK < rows.length && libraries[name] === data) {
+      if (from + CHUNK < shown.length && libraries[name] === data) {
         requestAnimationFrame(() => paint(from + CHUNK));
+      } else {
+        if (matches.length > shown.length) {
+          const more = el("tr", "more-row");
+          const cell = el("td");
+          cell.colSpan = 7;
+          cell.append(document.createTextNode(
+            `Showing ${shown.length} of ${matches.length} — search to narrow it down`
+          ));
+          const all = el("button", "ghost small", "Show all");
+          all.addEventListener("click", () => {
+            limits[name] = matches.length;
+            renderLibrary(name);
+          });
+          cell.append(all);
+          more.append(cell);
+          body.append(more);
+        }
+        broken.forEach((brokenName) => {
+          const row = el("tr", "broken");
+          row.append(
+            el("td", "col-cover", ""),
+            el("td", "col-no", ""),
+            el("td", "col-title", brokenName),
+            el("td", "col-artist", "—"),
+            el("td", "col-album", "target missing"),
+            el("td", "col-length", "—"),
+            el("td", "col-actions", "")
+          );
+          body.append(row);
+        });
+        restoreScroll(name);
       }
     };
     paint(0);
-
-    if (matches.length > shown.length) {
-      const more = el("tr", "more-row");
-      const cell = el("td");
-      cell.colSpan = 7;
-      cell.append(
-        document.createTextNode(`Showing ${shown.length} of ${matches.length} — filter to narrow it down`)
-      );
-      const all = el("button", "ghost small", "Show all");
-      all.addEventListener("click", () => {
-        limits[name] = matches.length;
-        renderLibrary(name);
-      });
-      cell.append(all);
-      more.append(cell);
-      body.append(more);
-    }
-
-    broken.forEach((brokenName) => {
-      const row = el("tr", "broken");
-      row.append(
-        el("td", "col-cover", ""),
-        el("td", "col-no", ""),
-        el("td", "col-title", brokenName),
-        el("td", "col-artist", "—"),
-        el("td", "col-album", "target missing"),
-        el("td", "col-length", "—"),
-        el("td", "col-actions", "")
-      );
-      body.append(row);
-    });
   }
 
   function renderServer(next) {
@@ -570,6 +610,38 @@
     if (next.art_pending) jobs.push(`reading ${next.art_pending} record(s) for art`);
     note.hidden = !jobs.length;
     if (jobs.length) note.innerHTML = `<span class="spinner"></span> ${jobs.join(", ")}…`;
+  }
+
+  function patchRow(row, track, name) {
+    if (!row || !row.children.length || row.classList.contains("more-row")) return;
+    const showFiles = state.config.show_filenames;
+    const [cover, number, title, artist, album, length] = row.children;
+
+    if (track.art && !cover.querySelector("img")) {
+      const thumb = el("img", "thumb");
+      thumb.src = coverUrl(track);
+      thumb.alt = "";
+      thumb.loading = "lazy";
+      cover.replaceChildren(thumb);
+    } else if (!track.art && state.art_pending && !cover.querySelector(".waiting")) {
+      cover.replaceChildren(el("span", "thumb waiting"));
+    }
+
+    const wantNumber = track.track ? String(track.track) : "";
+    if (number.textContent !== wantNumber) number.textContent = wantNumber;
+    const wantTitle = showFiles ? track.name : (track.title || track.name);
+    const titleNode = title.firstChild;
+    if (titleNode && titleNode.textContent !== wantTitle) titleNode.textContent = wantTitle;
+    if (artist.textContent !== (track.artist || "—")) artist.textContent = track.artist || "—";
+    if (album.textContent !== (track.album || "—")) album.textContent = track.album || "—";
+    const wantLength = track.duration ? clock(track.duration) : "—";
+    if (length.textContent !== wantLength) length.textContent = wantLength;
+    artist.classList.toggle("guessed", !!track.guessed);
+    album.classList.toggle("guessed", !!track.guessed);
+    row.classList.toggle(
+      "playing",
+      !!(state.now && state.now.name === track.name && state.running)
+    );
   }
 
   function renderSources(next) {
@@ -943,11 +1015,13 @@
 
   // -- wiring ---------------------------------------------------------
   function showPanel(name) {
+    rememberScroll();
     panel = name;
     document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === `panel-${name}`));
     document.querySelectorAll(".rail-btn").forEach((b) => b.classList.toggle("active", b.dataset.panel === name));
     if (name === "add") browse(browsePath);
     if (name === "music" || name === "ambient") loadLibrary(name);
+    restoreScroll(name);
   }
 
   function setSection(name) {
@@ -1110,7 +1184,19 @@
     $(key).addEventListener("change", () => call("config", { [key]: $(key).checked })));
 
   document.addEventListener("keydown", (event) => {
-    if (event.target.matches("input, textarea")) return;
+    if (event.target.matches("input, textarea")) {
+      if (event.key === "Escape" && event.target.matches("input.filter")) {
+        event.target.value = "";
+        event.target.dispatchEvent(new Event("input"));
+        event.target.blur();
+      }
+      return;
+    }
+    if (event.key === "/" || (event.key === "f" && (event.ctrlKey || event.metaKey))) {
+      const box = document.querySelector(`input.filter[data-filter-for="${panel}"]`);
+      if (box) { event.preventDefault(); box.focus(); box.select(); }
+      return;
+    }
     if (event.key === " ") { event.preventDefault(); call("toggle", {}); }
     if (event.key === "n") call("skip", {});
     if (event.key === "b") toggleBan();      // once to arm, again to confirm

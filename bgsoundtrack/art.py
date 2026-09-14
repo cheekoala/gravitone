@@ -52,6 +52,10 @@ class Art:
         except OSError:
             return path
 
+    def album_key(self, path: Path) -> str:
+        """An id for the record this track belongs to."""
+        return self._key(path)
+
     def _key(self, path: Path) -> str:
         # Albums share art, so key on the folder rather than the track: one
         # extraction covers a whole record. Resolve first, or every link in

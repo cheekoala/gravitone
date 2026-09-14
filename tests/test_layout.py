@@ -109,3 +109,61 @@ def test_the_header_sticks_while_scrolling(served):
 
     assert after < before, "the header did not move up with the scroll"
     assert 0 <= after <= 120, f"the header scrolled away (top={after:.0f})"
+
+
+def test_the_view_stays_put_while_the_table_updates(served):
+    """Covers and tags arrive while you are reading; the list must not jump."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1100, "height": 420})
+        try:
+            page.goto(served)
+            page.click("[data-panel=music]")
+            page.wait_for_selector("#music-list tr", timeout=15000)
+            page.wait_for_timeout(400)
+            page.evaluate("document.querySelector('.stage').scrollTop = 220")
+            page.wait_for_timeout(300)
+            start = page.evaluate("document.querySelector('.stage').scrollTop")
+            # several poll cycles, each of which re-renders the table
+            page.wait_for_timeout(3500)
+            settled = page.evaluate("document.querySelector('.stage').scrollTop")
+
+            page.click("[data-panel=now]")
+            page.wait_for_timeout(400)
+            page.click("[data-panel=music]")
+            page.wait_for_timeout(800)
+            returned = page.evaluate("document.querySelector('.stage').scrollTop")
+        finally:
+            browser.close()
+
+    assert start > 0, "the list should have been scrollable"
+    assert abs(settled - start) <= 2, f"the view drifted from {start} to {settled}"
+    assert abs(returned - start) <= 2, f"coming back landed at {returned}, not {start}"
+
+
+def test_the_table_header_is_filled_to_its_rounded_corners(served):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1100, "height": 600})
+        try:
+            page.goto(served)
+            page.click("[data-panel=music]")
+            page.wait_for_selector("#music-list tr", timeout=15000)
+            corners = page.evaluate(
+                """() => {
+                  const wrap = document.querySelector(".table-wrap");
+                  const th = document.querySelector("#music-table thead th:first-child");
+                  const last = document.querySelector("#music-table thead th:last-child");
+                  const px = (value) => parseFloat(value) || 0;
+                  return {
+                    wrap: px(getComputedStyle(wrap).borderTopLeftRadius),
+                    left: px(getComputedStyle(th).borderTopLeftRadius),
+                    right: px(getComputedStyle(last).borderTopRightRadius),
+                  };
+                }"""
+            )
+        finally:
+            browser.close()
+
+    assert corners["left"] >= corners["wrap"] - 1, "the header's fill squares off the panel corner"
+    assert corners["right"] >= corners["wrap"] - 1

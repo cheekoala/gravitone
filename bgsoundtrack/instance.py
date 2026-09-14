@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import signal
 import socket
 import time
@@ -140,6 +141,36 @@ def process_is_stale(ttl: float = 10.0) -> bool:
 def is_stale(instance: Instance) -> bool:
     """True if that running instance predates the installed code."""
     return bool(instance.started) and package_mtime() > instance.started + 1
+
+
+def token_path(config_file: Path | None = None) -> Path:
+    base = config_file or config_path()
+    return base.parent / "token"
+
+
+def token(config_file: Path | None = None, fresh: bool = False) -> str:
+    """This install's UI token, kept between runs.
+
+    A token that changed on every start meant every image URL changed too,
+    so a restart threw away the browser's whole cache of covers - and any
+    open page needed the new link.
+    """
+    path = token_path(config_file)
+    if not fresh:
+        try:
+            saved = path.read_text(encoding="utf-8").strip()
+            if saved:
+                return saved
+        except OSError:
+            pass
+    made = secrets.token_urlsafe(16)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(made + "\n", encoding="utf-8")
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return made
 
 
 def alive(instance: Instance) -> bool:

@@ -459,6 +459,7 @@ def cmd_ui(args) -> int:
         open_browser=not args.no_browser,
         root=str(Path(args.root).expanduser()) if args.root else None,
         new=args.new,
+        new_token=args.new_token,
     )
 
 
@@ -704,6 +705,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--stop", action="store_true", help="stop the running UI")
     p.add_argument("--status", action="store_true", help="is one running, and where")
+    p.add_argument(
+        "--new-token",
+        dest="new_token",
+        action="store_true",
+        help="issue a fresh access token (invalidates open pages and links)",
+    )
     p.add_argument(
         "--host",
         default="127.0.0.1",

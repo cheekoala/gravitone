@@ -83,12 +83,12 @@
               <div class="kicker" id="now-kind">Idle</div>
               <div class="now-title" id="now-title">Nothing playing</div>
               <div class="t-sub" id="now-sub"></div>
+              <div class="progress"><div class="progress-fill" id="now-progress"></div></div>
+              <div class="now-meta">
+                <span id="now-elapsed">0:00</span>
+                <span id="now-remaining"></span>
+              </div>
             </div>
-          </div>
-          <div class="progress"><div class="progress-fill" id="now-progress"></div></div>
-          <div class="now-meta">
-            <span id="now-elapsed">0:00</span>
-            <span id="now-remaining"></span>
           </div>
         </div>
 
@@ -116,7 +116,11 @@
         <div class="panel-head">
           <h2>Music <span class="count" id="music-count">0</span></h2>
           <div class="head-tools">
-            <input type="search" class="filter" data-filter-for="music" placeholder="Filter…" autocomplete="off" spellcheck="false">
+            <label class="search">
+              <svg viewBox="0 0 24 24" class="icon"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+              <input type="search" class="filter" data-filter-for="music" placeholder="Search title, artist, album…  ( / )" autocomplete="off" spellcheck="false">
+              <span class="found" id="music-found" hidden></span>
+            </label>
             <label class="switch inline"><input type="checkbox" class="filenames"><span class="track"></span>File names</label>
             <button class="ghost small" data-goto="add">Add music</button>
           </div>
@@ -144,7 +148,11 @@
         <div class="panel-head">
           <h2>Ambient <span class="count" id="ambient-count">0</span></h2>
           <div class="head-tools">
-            <input type="search" class="filter" data-filter-for="ambient" placeholder="Filter…" autocomplete="off" spellcheck="false">
+            <label class="search">
+              <svg viewBox="0 0 24 24" class="icon"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+              <input type="search" class="filter" data-filter-for="ambient" placeholder="Search title, artist, album…  ( / )" autocomplete="off" spellcheck="false">
+              <span class="found" id="ambient-found" hidden></span>
+            </label>
             <label class="switch inline"><input type="checkbox" class="filenames"><span class="track"></span>File names</label>
             <button class="ghost small" data-goto="add">Add ambience</button>
           </div>
