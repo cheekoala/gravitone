@@ -68,6 +68,7 @@ class Session:
         # it is showing has been overtaken by real tags.
         self._tags_version = 0
         self._counts: tuple | None = None   # memo, keyed by what can change it
+        self._album_map: tuple | None = None
         self._art = art_module.Art(art_module.cache_dir(self.config_path))
         self._art_pending = 0
         self._started = time.time()
@@ -201,6 +202,7 @@ class Session:
             "artist": known.artist if known else "",
             "album": known.album if known else "",
             "art": bool(cover),
+            "album_id": self._art.album_key(real) if real else "",
             "duration": None if hide else now.duration,
             "elapsed": None if hide else round(now.elapsed(), 2),
         }
@@ -227,6 +229,7 @@ class Session:
                     "source": str(entry.source) if entry.source else None,
                     **self._tag_fields(entry.target),
                     "art": bool(self._art.cached(entry.target)),
+                    "album_id": self._art.album_key(entry.target),
                 }
                 for entry in found
             ],
@@ -280,6 +283,7 @@ class Session:
         # it is showing has been overtaken by real tags.
         self._tags_version = 0
         self._counts: tuple | None = None   # memo, keyed by what can change it
+        self._album_map: tuple | None = None
         self._art = art_module.Art(art_module.cache_dir(self.config_path))
         self._art_pending = 0
         self._started = time.time()
@@ -516,22 +520,37 @@ class Session:
 
     # -- covers ----------------------------------------------------------
 
-    def cover(self, track: str) -> Path | None:
-        """The cover for a track we know about - and only for such a track.
+    def _albums(self) -> dict:
+        """album id -> a track of that record, for the playlist on show.
 
-        The page may name the track by the link it is played through or by
-        the file behind it; both are the same track.
+        Built once per change. Looking this up by walking the whole library
+        on every image request is what made a page of thumbnails crawl.
         """
-        asked = Path(track).expanduser()
-        real = self._real(asked)
+        key = (
+            self.store.version,
+            library.SCANNER.version,
+            self.playlist.id,
+            len(self.playlist.excluded),
+        )
+        if getattr(self, "_album_map", None) and self._album_map[0] == key:
+            return self._album_map[1]
+        mapping = {}
         for section in library.SECTIONS:
             for entry in library.entries(self.config, section, self.playlist):
-                if str(entry.path) in (str(asked), str(real)) or str(entry.target) in (
-                    str(asked),
-                    str(real),
-                ):
-                    return self._art.cached(entry.target) or self._art.find(entry.target)
-        return None
+                mapping.setdefault(self._art.album_key(entry.target), entry.target)
+        self._album_map = (key, mapping)
+        return mapping
+
+    def cover(self, album: str) -> Path | None:
+        """The cover for one record of this playlist, and only such a record."""
+        track = self._albums().get(album)
+        if track is None:
+            return None
+        return self._art.cached(track) or self._art.find(track)
+
+    def cover_for_track(self, track: str) -> Path | None:
+        path = self._real(Path(track).expanduser())
+        return self.cover(self._art.album_key(path))
 
     def forget_covers(self) -> int:
         """Look again for everything - after tagging files that had none."""

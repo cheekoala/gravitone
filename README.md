@@ -132,9 +132,13 @@ folder), and the server starts answering immediately instead of after the
 first scan. Tag reads and cover extraction also happen in the background —
 the Server card in Config shows what is being worked on.
 
-The track table builds 400 rows at a time and has a **filter box**; with
+The track table builds 400 rows at a time and has a **search box**; with
 thousands of tracks the page stays responsive instead of parking tens of
 thousands of nodes in the DOM. *Show all* is there when you want it.
+
+A refresh that would draw the same rows patches them in place instead of
+rebuilding the table, so **where you scrolled to stays where you scrolled
+to** while the tags and covers fill in around you.
 
 Anything in flight shows a thin sweeping bar across the top of the window,
 and buttons that take a moment (exporting a bundle, finding art) spin while
@@ -255,6 +259,15 @@ its cover in Now, and the table shows thumbnails for what has been found.
 background; art is cached in `~/.config/bgsoundtrack/covers/`, one per folder,
 since a record shares its cover.
 
+A cover is fetched **once per record, not once per track**, and served with
+an ETag and a week of cache headers. The token the page uses is kept in
+`~/.config/bgsoundtrack/token` rather than made up at every start, so a
+restart reuses the browser's cached art instead of re-fetching all of it;
+`bgst ui --new-token` throws the old one away when you want that.
+
+Now shows the cover of what is playing at full size, next to the title,
+artist and album; the table shows a thumbnail per row.
+
 ## The track table
 
 Each library is a table — track number, title, artist, album, length — and
@@ -278,6 +291,15 @@ tag. Tags are read in the background and cached in
 `~/.config/bgsoundtrack/tags.json`, so a listing never waits on a probe: the
 table fills in the moment the read lands, and says how many are left while it
 works.
+
+## Searching
+
+Every list has a **search box** above it. Type and the table narrows as you
+go, matching across the file name, title, artist, album and path; several
+words all have to match, in any order and any field, so `bell vela` finds the
+Vela track by Bell. It says `3 of 7` beside the box so you know what you are
+looking at. `/` (or Ctrl-F) jumps to it from anywhere on the page, Escape
+clears it.
 
 The header stays put while you scroll. Columns keep their share of the width
 and truncate with an ellipsis (the full value is in the tooltip), so a

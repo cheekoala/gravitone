@@ -12,6 +12,7 @@ drive your player (or browse your disk).
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import mimetypes
 import os
@@ -115,12 +116,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def _send_cacheable(self, body: bytes, content_type: str) -> None:
+    def _send_cacheable(self, body: bytes, content_type: str, etag: str = "") -> None:
         """Covers never change under the same URL, so let the browser keep them."""
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "private, max-age=86400")
+        self.send_header("Cache-Control", "private, max-age=604800, immutable")
+        if etag:
+            self.send_header("ETag", etag)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         if self.command != "HEAD":
@@ -227,15 +230,23 @@ class Handler(BaseHTTPRequestHandler):
         if route == "browse" and method == "GET":
             return browse((query.get("path") or [None])[0])
         if route == "cover" and method == "GET":
+            album = (query.get("album") or [""])[0]
             track = (query.get("track") or [""])[0]
-            if not track:
-                raise ValueError("cover needs a track")
-            found = session.cover(track)
+            if not album and not track:
+                raise ValueError("cover needs an album or a track")
+            found = session.cover(album) if album else session.cover_for_track(track)
             if found is None:
                 self._send(HTTPStatus.NOT_FOUND, b"no cover", "text/plain")
                 return SENT
             kind = mimetypes.guess_type(found.name)[0] or "image/jpeg"
-            self._send_cacheable(found.read_bytes(), kind)
+            body = found.read_bytes()
+            tag = f'"{hashlib.sha1(body).hexdigest()[:16]}"'
+            if self.headers.get("If-None-Match") == tag:
+                self.send_response(HTTPStatus.NOT_MODIFIED)
+                self.send_header("ETag", tag)
+                self.end_headers()
+                return SENT
+            self._send_cacheable(body, kind, tag)
             return SENT
         if route == "library" and method == "GET":
             section = (query.get("section") or ["music"])[0]
@@ -452,6 +463,7 @@ def run(
     open_browser: bool = True,
     root: str | None = None,
     new: bool = False,
+    new_token: bool = False,
 ) -> int:
     """Blocking entry point used by `bgst ui`."""
     wanted = DEFAULT_PORT if port is None else port
@@ -505,6 +517,7 @@ def run(
             session,
             host=host,
             port=wanted,
+            token=instance_state.token(config_path, fresh=new_token),
             open_browser=open_browser,
             fallback=port is None,
         )

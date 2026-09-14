@@ -74,11 +74,22 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
 }
 
 .head-tools { display: flex; align-items: center; gap: 8px; }
-.head-tools .filter {
-  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
-  border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 12.5px; width: 150px;
+.search {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+  padding: 0 10px; transition: border-color .15s, width .15s;
 }
-.head-tools .filter:focus { outline: none; border-color: var(--select); width: 210px; }
+.search:focus-within { border-color: var(--select); }
+.search .icon { width: 14px; height: 14px; color: var(--faint); flex: none; }
+.head-tools .filter {
+  background: none; color: var(--text); border: none;
+  padding: 6px 0; font: inherit; font-size: 12.5px; width: 230px;
+}
+.head-tools .filter:focus { outline: none; }
+.head-tools .filter::-webkit-search-cancel-button { filter: invert(.6); }
+.search .found {
+  font: 10.5px/1 var(--mono); color: var(--faint); white-space: nowrap; flex: none;
+}
 .more-row td { color: var(--muted); font-size: 12.5px; padding: 12px 10px !important; }
 .more-row button { margin-left: 8px; }
 .sort-pick { position: relative; display: inline-flex; align-items: center; }
@@ -183,7 +194,7 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
 
 /* -- now playing --------------------------------------------------- */
 .now-title {
-  font-size: 19px; font-weight: 600; letter-spacing: -0.015em; margin-bottom: 14px;
+  font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin-bottom: 4px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .progress { height: 4px; border-radius: 999px; background: #1e1e22; overflow: hidden; }
@@ -228,9 +239,11 @@ table.tracks {
   table-layout: fixed;
 }
 table.tracks th, table.tracks td {
-  text-align: left; padding: 7px 10px; white-space: nowrap;
+  text-align: left; padding: 6px 10px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
+table.tracks thead th:first-child { border-top-left-radius: var(--radius); }
+table.tracks thead th:last-child { border-top-right-radius: var(--radius); }
 table.tracks thead th {
   position: sticky; top: -16px; z-index: 3;   /* -16px cancels the stage padding */
   background: #141417; border-bottom: 1px solid var(--line);
@@ -260,7 +273,7 @@ table.tracks tbody tr.playing .t-title { color: #d9ccff; }
 table.tracks tbody tr.broken .t-title { color: #ff9ea1; }
 table.tracks tbody tr.empty td { color: var(--faint); padding: 16px 10px; white-space: normal; }
 
-.col-cover { width: 40px; }
+.col-cover { width: 50px; }
 .col-no { width: 40px; text-align: right !important; }
 td.col-no { font: 11px/1 var(--mono); color: var(--faint); text-align: right; }
 .col-title { width: 38%; }
@@ -416,7 +429,7 @@ input[type="range"]::-moz-range-thumb {
   100% { background-position: -30% 0; }
 }
 .sk-line { height: 10px; }
-.sk-thumb { width: 24px; height: 24px; border-radius: 4px; }
+.sk-thumb { width: 34px; height: 34px; border-radius: 5px; }
 tr.skeleton td { padding-top: 11px; padding-bottom: 11px; }
 tr.skeleton .sk-line.short { width: 42%; }
 tr.skeleton .sk-line.mid { width: 68%; }
@@ -448,16 +461,21 @@ button.busy { opacity: .75; pointer-events: none; }
 .working { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12.5px; }
 
 /* -- album art ----------------------------------------------------- */
-.now-head { display: flex; gap: 14px; align-items: flex-start; }
+.now-head { display: flex; gap: 18px; align-items: center; }
 .cover {
-  width: 74px; height: 74px; flex: none; border-radius: 8px; object-fit: cover;
+  width: 148px; height: 148px; flex: none; border-radius: 10px; object-fit: cover;
   background: var(--panel-2); border: 1px solid var(--line);
 }
-.cover.empty { display: grid; place-items: center; color: var(--faint); font-size: 22px; }
-.now-head .now-body { min-width: 0; flex: 1; }
+.cover.empty { display: grid; place-items: center; color: var(--faint); font-size: 40px; }
+.cover-holder { width: 148px; height: 148px; flex: none; }
+.cover-holder img { width: 100%; height: 100%; border-radius: 10px; object-fit: cover;
+  box-shadow: 0 6px 22px rgba(0,0,0,.45); }
+.now-head .now-body { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.now-head .progress { margin-top: 18px; }
+.now-head .t-sub { font-size: 12.5px; }
 td.col-cover { padding-right: 0; }
 .thumb {
-  width: 24px; height: 24px; border-radius: 4px; object-fit: cover;
+  width: 34px; height: 34px; border-radius: 5px; object-fit: cover;
   background: var(--panel-2); display: block;
 }
 
@@ -488,12 +506,14 @@ td.col-cover { padding-right: 0; }
 
 @media (max-width: 620px) {
   .col-length { display: none; }
+  .cover, .cover-holder { width: 96px; height: 96px; }
+  .now-head { gap: 12px; }
   /* The heading, the filter and the switch will not share one line at this
      width, so give the filter its own. */
   .panel-head { flex-wrap: wrap; row-gap: 8px; }
   .head-tools { width: 100%; order: 3; }
-  .head-tools .filter { flex: 1; width: auto; }
-  .head-tools .filter:focus { width: auto; }
+  .search { flex: 1; }
+  .head-tools .filter { flex: 1; width: auto; min-width: 0; }
   .switch.inline { white-space: nowrap; }
   /* Keep the top bar on one line: the path goes, the playlist name shortens,
      and Ban keeps its icon but drops its label. */
