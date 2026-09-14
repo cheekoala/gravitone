@@ -515,8 +515,10 @@ def test_a_linked_track_shows_its_own_tags_and_art(server, tmp_path):
     real.write_bytes(b"\0")
     cover = tmp_path / "cover-from-the-file.jpg"
     cover.write_bytes(b"\xff\xd8\xffart")
-    session._art.remember(real.parent, cover)      # as extraction would
+    # Tags first: they say which record this is, and the cover is filed
+    # under the record.
     session._tags.store(real, tags.Tags(title="Song", artist="Artist", album="Album"))
+    session._art.remember(real, cover)      # as extraction would
     library.link(config, [real], playlist=session.playlist)
 
     link = config.music_dir / "01 Song.mp3"
@@ -558,7 +560,7 @@ def test_a_cover_can_be_asked_for_by_the_link_or_the_file(server, tmp_path):
     real.write_bytes(b"\0")
     cover = tmp_path / "extracted.jpg"
     cover.write_bytes(b"\xff\xd8\xffart")
-    session._art.remember(real.parent, cover)
+    session._art.remember(real, cover)
     library.link(config, [real], playlist=session.playlist)
     link = config.music_dir / "song.mp3"
 

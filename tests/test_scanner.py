@@ -131,7 +131,7 @@ def test_a_picture_lying_in_the_folder_is_not_used(tmp_path, monkeypatch):
     for name in ("cover.jpg", "folder.jpg", "front.png"):
         (folder / name).write_bytes(b"\xff\xd8\xff")
     covers = art.Art(tmp_path / "covers")
-    monkeypatch.setattr(covers, "_extract", lambda path, remember_failure=True: None)
+    monkeypatch.setattr(covers, "_extract", lambda path, remember_failure=True, under=None: None)
     assert covers.find(folder / "one.mp3") is None
 
 
@@ -148,10 +148,10 @@ def test_art_is_shared_by_everything_in_one_folder(tmp_path, monkeypatch):
     covers = art.Art(tmp_path / "covers")
     extracted = tmp_path / "covers" / "art.jpg"
 
-    def fake_extract(path, remember_failure=True):
+    def fake_extract(path, remember_failure=True, under=None):
         extracted.parent.mkdir(parents=True, exist_ok=True)
         extracted.write_bytes(b"\xff\xd8\xff")
-        covers.remember(path.parent, extracted)
+        covers.remember(under or path, extracted)
         return extracted
 
     monkeypatch.setattr(covers, "_extract", fake_extract)
@@ -165,7 +165,7 @@ def test_a_record_is_searched_for_its_cover_not_just_one_track(tmp_path, monkeyp
 
     tried = []
 
-    def fake_extract(path, remember_failure=True):
+    def fake_extract(path, remember_failure=True, under=None):
         tried.append(path.name)
         if path.name != "03 third.mp3":
             return None
@@ -184,7 +184,7 @@ def test_a_record_with_no_art_anywhere_is_only_searched_once(tmp_path, monkeypat
     covers = art.Art(tmp_path / "covers")
     tried = []
     monkeypatch.setattr(
-        covers, "_extract", lambda path, remember_failure=True: tried.append(path) or None
+        covers, "_extract", lambda path, remember_failure=True, under=None: tried.append(path) or None
     )
     assert covers.find(folder / "01 a.mp3") is None
     assert covers.find(folder / "02 b.mp3") is None      # remembered, not retried
@@ -223,7 +223,7 @@ def test_answers_survive_a_restart(tmp_path, monkeypatch):
     again = art.Art(tmp_path / "covers")
     calls = []
     monkeypatch.setattr(
-        again, "_extract", lambda path, remember_failure=True: calls.append(path) or None
+        again, "_extract", lambda path, remember_failure=True, under=None: calls.append(path) or None
     )
     assert again.find(with_art / "a.mp3") == cover
     assert again.find(without / "b.mp3") is None
@@ -243,7 +243,7 @@ def test_a_cover_file_that_vanished_is_looked_for_again(tmp_path, monkeypatch):
     again = art.Art(tmp_path / "covers")
     tried = []
     monkeypatch.setattr(
-        again, "_extract", lambda path, remember_failure=True: tried.append(path) or None
+        again, "_extract", lambda path, remember_failure=True, under=None: tried.append(path) or None
     )
     assert again.find(folder / "a.mp3") is None
     assert tried, "a missing cover file should be looked for again"
@@ -274,9 +274,11 @@ def test_a_restart_does_not_reask_the_whole_library(tmp_path, monkeypatch):
 
     first = Session(config, tmp_path / "config.json", store=store)
     monkeypatch.setattr(
-        first._art, "_extract", lambda path, remember_failure=True: None
+        first._art, "_extract", lambda path, remember_failure=True, under=None: None
     )
-    assert first.find_covers() == 1          # one record to look at
+    # Two files, and nothing known about either yet: their records are an
+    # album tag away, so each is a job until the tags are read.
+    assert first.find_covers() == 2
     for _ in range(100):
         if first._art_pending == 0:
             break
@@ -286,7 +288,142 @@ def test_a_restart_does_not_reask_the_whole_library(tmp_path, monkeypatch):
     again = Session(config, tmp_path / "config.json", store=store)
     reads = []
     monkeypatch.setattr(
-        again._art, "_extract", lambda path, remember_failure=True: reads.append(path)
+        again._art, "_extract", lambda path, remember_failure=True, under=None: reads.append(path)
     )
     assert again.find_covers() == 0          # nothing left to ask
     assert reads == []
+
+
+# -- a folder can hold more than one record ------------------------------
+
+
+class FakeTags:
+    """Just enough of tags.Reader for the art index: album per file."""
+
+    def __init__(self, albums: dict):
+        self.albums = albums
+
+    def known(self, path):
+        from bgsoundtrack.tags import Tags
+
+        name = Path(path).name
+        if name in self.albums:
+            return Tags(album=self.albums[name])
+        return Tags(album=Path(path).parent.name, guessed=True)
+
+    def read(self, path):
+        return self.known(path)
+
+
+def test_two_records_in_one_folder_get_their_own_answers(tmp_path, monkeypatch):
+    """A folder of several albums used to answer as one: the first record
+    read decided for every track in it, so art on the others never showed."""
+    folder = album(
+        tmp_path / "game music",
+        "aa other 1.mp3", "aa other 2.mp3", "aa other 3.mp3",
+        "aa other 4.mp3", "aa other 5.mp3", "aa other 6.mp3",
+        "zz morrowind 1.mp3", "zz morrowind 2.mp3",
+    )
+    covers = art.Art(
+        tmp_path / "covers",
+        reader=FakeTags({
+            name: ("Morrowind" if "morrowind" in name else "Other Game")
+            for name in (p.name for p in folder.iterdir())
+        }),
+    )
+    found = tmp_path / "covers" / "morrowind.jpg"
+    found.parent.mkdir(parents=True)
+    found.write_bytes(b"\xff\xd8\xff")
+
+    def fake_extract(path, remember_failure=True, under=None):
+        # Only the Morrowind tracks carry a picture.
+        if "morrowind" not in path.name:
+            return None
+        covers.remember(under or path, found)
+        return found
+
+    monkeypatch.setattr(covers, "_extract", fake_extract)
+
+    # Ask about the coverless record first, exactly as a listing would.
+    assert covers.find(folder / "aa other 1.mp3") is None
+    assert covers.find(folder / "zz morrowind 1.mp3") == found
+    assert covers.find(folder / "zz morrowind 2.mp3") == found
+    assert covers.find(folder / "aa other 6.mp3") is None
+
+
+def test_a_records_neighbours_are_its_own_tracks(tmp_path):
+    """Looking for a picture across the folder means reading files that
+    belong to a different album."""
+    folder = album(tmp_path / "mixed", "a.mp3", "b.mp3", "c.mp3", "d.mp3")
+    covers = art.Art(
+        tmp_path / "covers",
+        reader=FakeTags({"a.mp3": "One", "b.mp3": "Two", "c.mp3": "One", "d.mp3": "Two"}),
+    )
+    assert [p.name for p in covers.siblings(folder / "a.mp3")] == ["a.mp3", "c.mp3"]
+
+
+def test_a_folder_keyed_index_is_not_read_back(tmp_path):
+    """The answers a folder-keyed run wrote include the wrong ones, so they
+    are dropped rather than carried into a run that knows better."""
+    directory = tmp_path / "covers"
+    directory.mkdir()
+    (directory / art.INDEX_NAME).write_text(
+        json.dumps({"version": 1, "folders": {str(tmp_path / "music"): None}})
+    )
+    covers = art.Art(directory)
+    assert covers.remembered() == {}
+
+
+def test_looking_again_drops_the_covers_it_pulled_out(tmp_path):
+    """Otherwise a cover found under the old grouping is served straight
+    back, from the file, whatever the new answer would be."""
+    covers = art.Art(tmp_path / "covers")
+    stale = tmp_path / "covers" / "old.jpg"
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"\xff\xd8\xff")
+    covers.forget()
+    assert not stale.exists()
+
+
+def test_a_picture_without_the_usual_marker_still_counts(tmp_path, monkeypatch):
+    """Not every container flags its cover as an attached picture, and a
+    picture is a picture."""
+    song = album(tmp_path / "album", "a.flac") / "a.flac"
+    monkeypatch.setattr(art.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    class Done:
+        stdout = json.dumps(
+            {"streams": [{"codec_name": "png", "disposition": {"attached_pic": 0}}]}
+        )
+
+    monkeypatch.setattr(art.subprocess, "run", lambda *a, **k: Done())
+    assert art.Art.has_picture(song) is True
+
+
+def test_a_failed_art_scan_does_not_wedge_the_next_one(tmp_path, monkeypatch):
+    """A scan that dies used to leave the counter up, and every later
+    'find album art' then did nothing at all, silently."""
+    from bgsoundtrack.service import Session
+
+    album(tmp_path / "music" / "Artist" / "Album", "a.mp3")
+    config = Config(root=str(tmp_path / "lib"))
+    store = playlists.Store()
+    library.init(config, store.current())
+    library.add_source(config, tmp_path / "music", playlist=store.current())
+
+    session = Session(config, tmp_path / "config.json", store=store)
+
+    def boom(path, remember_failure=True, under=None):
+        raise OSError("the disk went away")
+
+    monkeypatch.setattr(session._art, "_extract", boom)
+    assert session.find_covers() == 1
+    for _ in range(200):
+        if session._art_pending == 0:
+            break
+        time.sleep(0.02)
+    assert session._art_pending == 0
+    monkeypatch.setattr(
+        session._art, "_extract", lambda path, remember_failure=True, under=None: None
+    )
+    assert session.forget_covers() == 1      # it can still be asked again
