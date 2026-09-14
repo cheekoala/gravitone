@@ -435,7 +435,9 @@ def test_a_cover_is_served_only_for_a_track_in_the_library(server, tmp_path):
     httpd, session, config, _ = server
     album = tmp_path / "album"
     make_audio(album, "one.mp3")
-    (album / "folder.jpg").write_bytes(b"\xff\xd8\xffcover-bytes")
+    cover = tmp_path / "extracted.jpg"
+    cover.write_bytes(b"\xff\xd8\xffcover-bytes")
+    session._art.remember(album, cover)
     request(httpd, "/api/source", {"path": str(album)})
 
     url = f"http://127.0.0.1:{httpd.server_port}/api/cover?track={album / 'one.mp3'}&t={httpd.token}"
@@ -511,7 +513,9 @@ def test_a_linked_track_shows_its_own_tags_and_art(server, tmp_path):
     real = tmp_path / "Artist" / "Album" / "01 Song.mp3"
     real.parent.mkdir(parents=True)
     real.write_bytes(b"\0")
-    (real.parent / "cover.jpg").write_bytes(b"\xff\xd8\xffart")
+    cover = tmp_path / "cover-from-the-file.jpg"
+    cover.write_bytes(b"\xff\xd8\xffart")
+    session._art.remember(real.parent, cover)      # as extraction would
     session._tags.store(real, tags.Tags(title="Song", artist="Artist", album="Album"))
     library.link(config, [real], playlist=session.playlist)
 
@@ -552,7 +556,9 @@ def test_a_cover_can_be_asked_for_by_the_link_or_the_file(server, tmp_path):
     real = tmp_path / "Artist" / "Album" / "song.mp3"
     real.parent.mkdir(parents=True)
     real.write_bytes(b"\0")
-    (real.parent / "cover.jpg").write_bytes(b"\xff\xd8\xffart")
+    cover = tmp_path / "extracted.jpg"
+    cover.write_bytes(b"\xff\xd8\xffart")
+    session._art.remember(real.parent, cover)
     library.link(config, [real], playlist=session.playlist)
     link = config.music_dir / "song.mp3"
 

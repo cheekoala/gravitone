@@ -124,11 +124,15 @@ def test_counts_are_recomputed_when_something_changes(tmp_path):
 # -- album art ----------------------------------------------------------
 
 
-def test_a_cover_beside_the_music_is_found(tmp_path):
+def test_a_picture_lying_in_the_folder_is_not_used(tmp_path, monkeypatch):
+    """Only what the file carries counts - a stray cover.jpg is someone
+    else's idea of what this record looks like."""
     folder = album(tmp_path / "album", "one.mp3")
-    (folder / "folder.jpg").write_bytes(b"\xff\xd8\xff")
+    for name in ("cover.jpg", "folder.jpg", "front.png"):
+        (folder / name).write_bytes(b"\xff\xd8\xff")
     covers = art.Art(tmp_path / "covers")
-    assert covers.find(folder / "one.mp3") == folder / "folder.jpg"
+    monkeypatch.setattr(covers, "_extract", lambda path, remember_failure=True: None)
+    assert covers.find(folder / "one.mp3") is None
 
 
 def test_no_cover_is_remembered_as_no_cover(tmp_path, monkeypatch):
@@ -139,11 +143,19 @@ def test_no_cover_is_remembered_as_no_cover(tmp_path, monkeypatch):
     assert covers.find(folder / "one.mp3") is None
 
 
-def test_art_is_shared_by_everything_in_one_folder(tmp_path):
+def test_art_is_shared_by_everything_in_one_folder(tmp_path, monkeypatch):
     folder = album(tmp_path / "album", "one.mp3", "two.mp3")
-    (folder / "cover.png").write_bytes(b"\x89PNG")
     covers = art.Art(tmp_path / "covers")
-    assert covers.find(folder / "one.mp3") == covers.find(folder / "two.mp3")
+    extracted = tmp_path / "covers" / "art.jpg"
+
+    def fake_extract(path, remember_failure=True):
+        extracted.parent.mkdir(parents=True, exist_ok=True)
+        extracted.write_bytes(b"\xff\xd8\xff")
+        covers.remember(path.parent, extracted)
+        return extracted
+
+    monkeypatch.setattr(covers, "_extract", fake_extract)
+    assert covers.find(folder / "one.mp3") == covers.find(folder / "two.mp3") == extracted
 
 
 def test_a_record_is_searched_for_its_cover_not_just_one_track(tmp_path, monkeypatch):
@@ -181,11 +193,100 @@ def test_a_record_with_no_art_anywhere_is_only_searched_once(tmp_path, monkeypat
 
 def test_art_for_a_link_belongs_to_the_file_it_points_at(tmp_path):
     real = album(tmp_path / "Artist" / "Album", "song.mp3")
-    (real / "cover.jpg").write_bytes(b"\xff\xd8\xff")
     links = tmp_path / "library"
     links.mkdir()
     link = links / "song.mp3"
     link.symlink_to(real / "song.mp3")
 
     covers = art.Art(tmp_path / "covers")
-    assert covers.find(link) == real / "cover.jpg"
+    cover = tmp_path / "covers" / "album.jpg"
+    cover.parent.mkdir(parents=True)
+    cover.write_bytes(b"\xff\xd8\xff")
+    covers.remember(real, cover)          # found from the real file
+
+    assert covers.find(link) == cover     # and the link gets it too
+
+
+def test_answers_survive_a_restart(tmp_path, monkeypatch):
+    """Both kinds: the cover we found, and the record that has none."""
+    with_art = album(tmp_path / "with", "a.mp3")
+    without = album(tmp_path / "without", "b.mp3")
+    cover = tmp_path / "covers" / "found.jpg"
+    cover.parent.mkdir(parents=True)
+    cover.write_bytes(b"\xff\xd8\xff")
+
+    first = art.Art(tmp_path / "covers")
+    first.remember(with_art, cover)
+    first.remember(without, None)
+    first.save()
+
+    again = art.Art(tmp_path / "covers")
+    calls = []
+    monkeypatch.setattr(
+        again, "_extract", lambda path, remember_failure=True: calls.append(path) or None
+    )
+    assert again.find(with_art / "a.mp3") == cover
+    assert again.find(without / "b.mp3") is None
+    assert calls == []          # nothing was read again
+
+
+def test_a_cover_file_that_vanished_is_looked_for_again(tmp_path, monkeypatch):
+    folder = album(tmp_path / "album", "a.mp3")
+    cover = tmp_path / "covers" / "gone.jpg"
+    cover.parent.mkdir(parents=True)
+    cover.write_bytes(b"\xff\xd8\xff")
+    first = art.Art(tmp_path / "covers")
+    first.remember(folder, cover)
+    first.save()
+    cover.unlink()
+
+    again = art.Art(tmp_path / "covers")
+    tried = []
+    monkeypatch.setattr(
+        again, "_extract", lambda path, remember_failure=True: tried.append(path) or None
+    )
+    assert again.find(folder / "a.mp3") is None
+    assert tried, "a missing cover file should be looked for again"
+
+
+def test_files_without_a_picture_are_not_handed_to_ffmpeg(tmp_path, monkeypatch):
+    """The header says whether there is one; scanning the whole file to find
+    out costs seconds per track."""
+    folder = album(tmp_path / "album", "a.mp3")
+    covers = art.Art(tmp_path / "covers")
+    monkeypatch.setattr(art.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(art.Art, "has_picture", staticmethod(lambda path: False))
+    ran = []
+    monkeypatch.setattr(art.subprocess, "run", lambda *a, **k: ran.append(a))
+    assert covers.find(folder / "a.mp3") is None
+    assert ran == []
+
+
+def test_a_restart_does_not_reask_the_whole_library(tmp_path, monkeypatch):
+    """The point of writing answers down: a second run reads no files."""
+    from bgsoundtrack.service import Session
+
+    folder = album(tmp_path / "music" / "Artist" / "Album", "a.mp3", "b.mp3")
+    config = Config(root=str(tmp_path / "lib"))
+    store = playlists.Store()
+    library.init(config, store.current())
+    library.add_source(config, tmp_path / "music", playlist=store.current())
+
+    first = Session(config, tmp_path / "config.json", store=store)
+    monkeypatch.setattr(
+        first._art, "_extract", lambda path, remember_failure=True: None
+    )
+    assert first.find_covers() == 1          # one record to look at
+    for _ in range(100):
+        if first._art_pending == 0:
+            break
+        time.sleep(0.02)
+    first._art.save()
+
+    again = Session(config, tmp_path / "config.json", store=store)
+    reads = []
+    monkeypatch.setattr(
+        again._art, "_extract", lambda path, remember_failure=True: reads.append(path)
+    )
+    assert again.find_covers() == 0          # nothing left to ask
+    assert reads == []

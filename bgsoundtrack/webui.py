@@ -322,7 +322,10 @@ class Handler(BaseHTTPRequestHandler):
             result = session.import_file(path, body.get("name"))
             return {**session.snapshot(), "result": result}
         elif route == "covers":
-            return {**session.snapshot(), "result": session.find_covers()}
+            result = (
+                session.forget_covers() if body.get("again") else session.find_covers()
+            )
+            return {**session.snapshot(), "result": result}
         elif route == "server":
             action = body.get("action", "")
             if action == "stop":

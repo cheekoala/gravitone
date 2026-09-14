@@ -266,7 +266,7 @@ td.col-no { font: 11px/1 var(--mono); color: var(--faint); text-align: right; }
 .col-title { width: 38%; }
 .col-artist { width: 21%; color: var(--muted); }
 .col-album { width: 21%; color: var(--muted); }
-.col-length { width: 66px; text-align: right !important; }
+.col-length { width: 78px; text-align: right !important; }
 td.col-length { font: 11px/1 var(--mono); color: var(--faint); }
 .col-actions { width: 62px; }
 /* Anything too long ends in an ellipsis, with the whole value on hover. */
@@ -401,6 +401,27 @@ input[type="range"]::-moz-range-thumb {
   border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; color: var(--faint); flex: none;
 }
 .tag.source { color: #c4b5fd; border-color: rgba(124,58,237,.45); }
+
+/* -- waiting ------------------------------------------------------- */
+/* Placeholder rows that breathe, so a library that takes a moment looks
+   like it is arriving rather than like nothing happened. */
+.sk {
+  display: block; border-radius: 4px;
+  background: linear-gradient(90deg, #1b1b20 25%, #26262d 50%, #1b1b20 75%);
+  background-size: 260% 100%;
+  animation: pulse-sk 1.5s ease-in-out infinite;
+}
+@keyframes pulse-sk {
+  0% { background-position: 130% 0; }
+  100% { background-position: -30% 0; }
+}
+.sk-line { height: 10px; }
+.sk-thumb { width: 24px; height: 24px; border-radius: 4px; }
+tr.skeleton td { padding-top: 11px; padding-bottom: 11px; }
+tr.skeleton .sk-line.short { width: 42%; }
+tr.skeleton .sk-line.mid { width: 68%; }
+.thumb.waiting { background: linear-gradient(90deg, #1b1b20 25%, #26262d 50%, #1b1b20 75%);
+  background-size: 260% 100%; animation: pulse-sk 1.5s ease-in-out infinite; }
 
 /* -- activity ------------------------------------------------------ */
 /* A thin bar across the top while anything is in flight, so a click always

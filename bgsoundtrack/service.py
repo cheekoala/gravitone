@@ -533,27 +533,42 @@ class Session:
                     return self._art.cached(entry.target) or self._art.find(entry.target)
         return None
 
+    def forget_covers(self) -> int:
+        """Look again for everything - after tagging files that had none."""
+        self._art.forget()
+        self._tags_version += 1
+        return self.find_covers()
+
     def find_covers(self) -> int:
         """Go looking for art for everything in this playlist, in the
         background. Returns how many tracks it will look at."""
-        targets = [
-            entry.target
-            for section in library.SECTIONS
-            for entry in library.entries(self.config, section, self.playlist)
-        ]
-        wanted = [path for path in targets if self._art.cached(path) is None]
+        # One record, one look: count albums, not tracks, or the progress
+        # reads like thousands of jobs when it is a few dozen.
+        wanted = []
+        seen = set()
+        for section in library.SECTIONS:
+            for entry in library.entries(self.config, section, self.playlist):
+                folder = str(self._art.real(entry.target).parent)
+                if folder in seen or self._art.answered(entry.target)[0]:
+                    continue
+                seen.add(folder)
+                wanted.append(entry.target)
         if not wanted or self._art_pending:
             return 0
         self._art_pending = len(wanted)
 
         def work() -> None:
-            seen = set()
+            found = 0
             for path in wanted:
-                if str(path.parent) not in seen:
-                    seen.add(str(path.parent))
-                    self._art.find(path)
+                if self._art.find(path):
+                    found += 1
+                    if found % 5 == 0:
+                        # Let the thumbnails appear as they are found.
+                        self._art.save()
+                        self._tags_version += 1
                 self._art_pending = max(0, self._art_pending - 1)
             self._art_pending = 0
+            self._art.save()
             self._tags_version += 1      # the table has new thumbnails
 
         threading.Thread(target=work, daemon=True, name="bgst-art-scan").start()

@@ -466,6 +466,8 @@
         thumb.alt = "";
         thumb.loading = "lazy";
         cover.append(thumb);
+      } else if (state.art_pending) {
+        cover.append(el("span", "thumb waiting"));   // still being looked for
       }
       row.append(cover, el("td", "col-no", track.track ? String(track.track) : ""));
 
@@ -565,7 +567,7 @@
     const jobs = [];
     if (next.indexing) jobs.push(`indexing ${next.indexing} folder(s)`);
     if (next.tags_pending) jobs.push(`reading ${next.tags_pending} tag(s)`);
-    if (next.art_pending) jobs.push(`looking for ${next.art_pending} cover(s)`);
+    if (next.art_pending) jobs.push(`reading ${next.art_pending} record(s) for art`);
     note.hidden = !jobs.length;
     if (jobs.length) note.innerHTML = `<span class="spinner"></span> ${jobs.join(", ")}…`;
   }
@@ -666,12 +668,37 @@
   }
 
   // -- libraries (fetched on demand, not in every poll) ----------------
+  function renderSkeleton(name) {
+    // How many rows we expect, so the page does not jump when they land.
+    const expected = Math.min(state ? state.counts[name] : 8, 14) || 8;
+    const body = $(`${name}-list`);
+    body.replaceChildren();
+    for (let i = 0; i < expected; i += 1) {
+      const row = el("tr", "skeleton");
+      const cover = el("td", "col-cover");
+      cover.append(el("span", "sk sk-thumb"));
+      const title = el("td", "col-title");
+      title.append(el("span", `sk sk-line ${i % 3 ? "mid" : ""}`));
+      const artist = el("td", "col-artist");
+      artist.append(el("span", "sk sk-line short"));
+      const album = el("td", "col-album");
+      album.append(el("span", "sk sk-line mid"));
+      const length = el("td", "col-length");
+      length.append(el("span", "sk sk-line short"));
+      row.append(cover, el("td", "col-no", ""), title, artist, album, length,
+                 el("td", "col-actions", ""));
+      body.append(row);
+    }
+  }
+
   async function loadLibrary(name) {
+    if (!libraries[name]) renderSkeleton(name);
     try {
-      libraries[name] = await api(`library?section=${name}`);
+      libraries[name] = await api(`library?section=${name}`, undefined, true);
       renderLibrary(name);
     } catch (err) {
       toast(err.message, true);
+      $(`${name}-list`).replaceChildren();
     }
   }
 
@@ -1022,8 +1049,19 @@
       const done = await call("covers", {});
       if (done) {
         toast(done.result
-          ? `Looking for art on ${done.result} track(s) — the table fills in as it goes`
-          : "Nothing left to look for");
+          ? `Reading ${done.result} record(s) for art — the table fills in as it goes`
+          : "Every record has been asked already — use Look again after tagging files");
+      }
+    }));
+
+  $("recheck-covers").addEventListener("click", (event) =>
+    withSpinner(event.currentTarget, async () => {
+      // Files that gained art since we last looked are worth a second ask.
+      const done = await call("covers", { again: true });
+      if (done) {
+        toast(done.result
+          ? `Reading ${done.result} record(s) again`
+          : "Nothing to read");
       }
     }));
 
