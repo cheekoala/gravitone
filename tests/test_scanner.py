@@ -427,3 +427,86 @@ def test_a_failed_art_scan_does_not_wedge_the_next_one(tmp_path, monkeypatch):
         session._art, "_extract", lambda path, remember_failure=True, under=None: None
     )
     assert session.forget_covers() == 1      # it can still be asked again
+
+
+# -- the tagger's idea of the format is not the format -------------------
+
+
+def picture_flac(path: Path, mime: str) -> Path:
+    """A FLAC carrying a JPEG cover that declares itself as `mime`."""
+    import shutil as _shutil
+    import struct
+    import subprocess
+
+    if not _shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg is not installed")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-y",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+            "-f", "lavfi", "-i", "color=c=orange:s=400x400:d=1",
+            "-frames:v", "1", "-map", "0:a", "-map", "1:v",
+            "-c:a", "flac", "-c:v", "mjpeg", "-disposition:v", "attached_pic",
+            str(path),
+        ],
+        check=True,
+    )
+    # Rewrite the PICTURE block's declared type, leaving the JPEG alone -
+    # which is exactly the state plenty of tagged files are in.
+    data = path.read_bytes()
+    out, pos = b"fLaC", 4
+    while True:
+        header, length = data[pos], int.from_bytes(data[pos + 1:pos + 4], "big")
+        body = data[pos + 4:pos + 4 + length]
+        pos += 4 + length
+        if header & 0x7F == 6:
+            old = int.from_bytes(body[4:8], "big")
+            body = (
+                body[:4]
+                + struct.pack(">I", len(mime)) + mime.encode()
+                + body[8 + old:]
+            )
+        out += bytes([header & 0x80 | header & 0x7F]) + len(body).to_bytes(3, "big") + body
+        if header & 0x80:
+            break
+    path.write_bytes(out + data[pos:])
+    return path
+
+
+def test_a_cover_is_read_from_its_bytes_not_its_label(tmp_path):
+    """A JPEG filed as image/png is common, and decoding it by the label
+    fails outright: ffmpeg picks the PNG decoder and refuses the picture."""
+    song = picture_flac(tmp_path / "album" / "01 song.flac", "image/png")
+    covers = art.Art(tmp_path / "covers")
+    found = covers.find(song)
+    assert found is not None
+    assert found.read_bytes()[:3] == b"\xff\xd8\xff"     # the JPEG it really is
+
+
+def test_a_correctly_labelled_cover_still_comes_out(tmp_path):
+    song = picture_flac(tmp_path / "album" / "01 song.flac", "image/jpeg")
+    covers = art.Art(tmp_path / "covers")
+    assert covers.find(song) is not None
+
+
+def test_what_a_file_is_comes_from_its_first_bytes(tmp_path):
+    cases = {
+        "a.bin": (b"\xff\xd8\xff\xe0JFIF", ".jpg"),
+        "b.bin": (b"\x89PNG\r\n\x1a\n" + b"\0" * 8, ".png"),
+        "c.bin": (b"RIFF\0\0\0\0WEBPVP8 ", ".webp"),
+        "d.bin": (b"GIF89a" + b"\0" * 8, ".gif"),
+        "e.bin": (b"not a picture at all", None),
+        "f.bin": (b"", None),
+    }
+    for name, (head, expected) in cases.items():
+        target = tmp_path / name
+        target.write_bytes(head)
+        assert art.Art._sniff(target) == expected, name
+
+
+def test_the_working_file_is_not_left_behind(tmp_path):
+    song = picture_flac(tmp_path / "album" / "01 song.flac", "image/png")
+    covers = art.Art(tmp_path / "covers")
+    covers.find(song)
+    assert list((tmp_path / "covers").glob("*.raw")) == []
