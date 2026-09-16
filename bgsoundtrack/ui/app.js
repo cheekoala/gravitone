@@ -40,6 +40,12 @@
   const limits = { music: 400, ambient: 400 };   // rows built at once
 
   // -- server ---------------------------------------------------------
+  // Bumped every time an action's answer is painted. A poll that was already
+  // in flight when that happened describes the world *before* it, so it is
+  // dropped rather than painted - otherwise starting a party (which the
+  // server does slowly, reading every tag) flickers back to "no party" each
+  // time a stale poll lands.
+  let generation = 0;
   let inFlight = 0;
   function busy(delta) {
     inFlight = Math.max(0, inFlight + delta);
@@ -85,13 +91,41 @@
     return payload;
   }
 
-  function toast(message, bad) {
+  function toast(message, bad, stay) {
     const node = $("toast");
     node.textContent = message;
     node.classList.toggle("bad", !!bad);
+    node.classList.toggle("stay", !!stay);
     node.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { node.hidden = true; }, 3600);
+    // A sticky toast is dismissed by what it is about ending, not by a timer.
+    if (!stay) toastTimer = setTimeout(() => { node.hidden = true; }, 3600);
+  }
+
+  function hideToast() {
+    clearTimeout(toastTimer);
+    $("toast").hidden = true;
+    $("toast").classList.remove("stay");
+  }
+
+  // Sitting a track out in a party: which item was on when skip was pressed.
+  // Skipping there stops the sound without moving your place, so there is
+  // nothing to see unless we say so - and it has to keep saying so until the
+  // party moves on by itself.
+  let sittingOut = null;
+  let comingShape = null;     // what the "coming up" list was last built from
+
+  const partyItem = (next) =>
+    (next && next.party && next.party.now && next.party.now.at) || null;
+
+  function sitOut() {
+    sittingOut = partyItem(state);
+    if (sittingOut === null) return;
+    toast("Sitting this one out — back with everyone at the next track", false, true);
+    // Say it now, not on the next render: a button whose effect is silence
+    // has to answer for itself immediately.
+    $("now-kind").textContent = "Sitting this one out";
+    $("panel-now").classList.add("is-sitting");
   }
 
   function offline(detail, lead) {
@@ -103,7 +137,10 @@
   async function call(route, body) {
     try {
       const next = await api(route, body);
-      if (next && next.config) render(next);
+      if (next && next.config) {
+        generation += 1;
+        render(next);
+      }
       return next;
     } catch (err) {
       // The usual cause of an unknown setting is a page newer than the
@@ -201,6 +238,11 @@
     // The armed confirm belongs to one track; if that track is gone, so is it.
     if (armed && (!now || now.name !== armed)) disarmBan();
 
+    // The party moved on (or we left it): the sit-out is over.
+    if (sittingOut !== null && partyItem(next) !== sittingOut) {
+      sittingOut = null;
+      hideToast();
+    }
     renderParty(next);
 
     const nowPanel = $("panel-now");
@@ -216,7 +258,10 @@
       silence: "Silence",
       absent: "Playing for them, not here",
     };
-    $("now-kind").textContent = now ? kinds[now.kind] : (running ? "Starting" : "Idle");
+    $("now-kind").textContent = sittingOut !== null
+      ? "Sitting this one out"
+      : now ? kinds[now.kind] : (running ? "Starting" : "Idle");
+    nowPanel.classList.toggle("is-sitting", sittingOut !== null);
     $("now-title").textContent = now
       ? (now.kind === "silence" ? "Quiet" : (now.label || now.name))
       : (next.error ? "Stopped" : "Nothing playing");
@@ -1048,7 +1093,10 @@
     $("party-off").hidden = !!party;
     $("party-on").hidden = !party;
     document.querySelector('[data-panel="party"]').classList.toggle("live-on", !!party);
-    if (!party) return;
+    if (!party) {
+      comingShape = null;
+      return;
+    }
 
     $("party-name").textContent = party.name || "Party";
     $("party-kicker").textContent = party.over ? "Party finished" : "In a party";
@@ -1068,19 +1116,29 @@
     const done = on && on.duration ? Math.min(1, on.into / on.duration) : 0;
     $("party-progress").style.width = `${(done * 100).toFixed(1)}%`;
 
+    // Rebuilt only when it has actually changed. This is polled once a
+    // second and the next few items rarely differ between two polls;
+    // replacing the rows every time makes the card twitch.
     const coming = $("party-next");
-    coming.replaceChildren();
-    (party.next || []).forEach((item) => {
-      const row = el("li");
-      row.appendChild(el("span", "when", timeOfDay(item.at)));
-      const what = item.kind === "silence" ? "silence"
+    const rows = (party.next || []).map((item) => ({
+      when: timeOfDay(item.at),
+      what: (item.kind === "silence" ? "silence"
         : item.kind === "ambient" ? (item.label || "ambience")
-        : item.label;
-      row.appendChild(el("span", item.here ? "" : "gone",
-        what + (item.here ? "" : " (silence here)")));
-      coming.appendChild(row);
-    });
-    if (!coming.children.length) coming.appendChild(el("li", "empty", "—"));
+        : item.label) + (item.here ? "" : " (silence here)"),
+      here: item.here,
+    }));
+    const shape = JSON.stringify(rows);
+    if (shape !== comingShape) {
+      comingShape = shape;
+      coming.replaceChildren();
+      rows.forEach((row) => {
+        const line = el("li");
+        line.appendChild(el("span", "when", row.when));
+        line.appendChild(el("span", row.here ? "" : "gone", row.what));
+        coming.appendChild(line);
+      });
+      if (!rows.length) coming.appendChild(el("li", "empty", "—"));
+    }
 
     const missing = party.missing || [];
     $("party-missing").hidden = !missing.length;
@@ -1220,7 +1278,15 @@
     button.addEventListener("click", () => setSection(button.dataset.section)));
 
   $("transport").addEventListener("click", () => call("toggle", {}));
-  $("skip").addEventListener("click", () => call("skip", {}));
+  // A sticky toast can be waved away by hand; the sit-out itself stands.
+  $("toast").addEventListener("click", () => {
+    if ($("toast").classList.contains("stay")) hideToast();
+  });
+
+  $("skip").addEventListener("click", () => {
+    sitOut();
+    call("skip", {});
+  });
   $("ban").addEventListener("click", toggleBan);
   $("ban-confirm").addEventListener("click", confirmBan);
   document.addEventListener("click", (event) => {
@@ -1376,7 +1442,7 @@
       return;
     }
     if (event.key === " ") { event.preventDefault(); call("toggle", {}); }
-    if (event.key === "n") call("skip", {});
+    if (event.key === "n") { sitOut(); call("skip", {}); }
     if (event.key === "b") toggleBan();      // once to arm, again to confirm
     if (event.key === "Escape") disarmBan();
   });
@@ -1385,7 +1451,10 @@
   let failures = 0;
   async function poll() {
     try {
-      render(await api("state", undefined, true));   // quiet: no activity bar
+      const seen = generation;
+      const next = await api("state", undefined, true);   // quiet: no activity bar
+      // An action landed while this was on the wire: its answer is newer.
+      if (generation === seen) render(next);
       failures = 0;
       if (!state || !state.stale) $("offline").hidden = true;
     } catch (err) {

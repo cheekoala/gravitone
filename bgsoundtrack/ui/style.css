@@ -494,6 +494,16 @@ td.col-cover { padding-right: 0; }
   max-width: min(520px, calc(100vw - 32px));
 }
 .toast.bad { border-color: rgba(229,72,77,.5); color: #ffb4b6; }
+/* A toast that stays until the thing it is about is over. */
+.toast.stay {
+  border-color: var(--accent-dim);
+  color: #7ff0d0;
+  background: rgba(20, 184, 143, .1);
+  cursor: pointer;
+}
+/* Sitting a track out: the party plays on, this room is quiet. */
+.is-sitting .cover, .is-sitting .now-title { opacity: .5; }
+.is-sitting .progress-fill { background: var(--faint); }
 [hidden] { display: none !important; }
 
 /* -- small screens ------------------------------------------------- */

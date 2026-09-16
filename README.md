@@ -430,7 +430,11 @@ So the two libraries need nothing in common but the music:
 
 In a party **skip sits a track out**: the sound stops, your place does not,
 and you are back with everyone at the next track. It cannot put you out of
-step, so there is no warning to click through. Ban is off for a track that
+step, so there is no warning to click through — but a button whose whole
+effect is *silence* looks broken, so the page says what it did and **keeps
+saying it** until the party moves on by itself: a note that stays put rather
+than fading after three seconds, and "Sitting this one out" where the player
+would normally name what is on. Click the note to wave it away. Ban is off for a track that
 is not on your machine, and a track you have banned simply plays as silence
 for you — the same rule as one you never had.
 

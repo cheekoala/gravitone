@@ -231,3 +231,133 @@ def test_the_party_code_never_leaves_its_card(served, width):
             assert measured["sideways"] is False
         finally:
             browser.close()
+
+
+def test_a_slow_poll_cannot_undo_a_fresh_answer(served):
+    """A poll already on the wire when an action lands describes the world
+    before it. Painting one of those puts "no party" back on the screen."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=party]")
+            page.wait_for_selector("#party-off:not([hidden])", timeout=15000)
+            # Hold every state poll on the wire for three seconds, so the one
+            # in flight is guaranteed to land after the party has started.
+            page.evaluate(
+                """() => {
+                    const real = window.fetch;
+                    window.fetch = (url, opts) => real(url, opts).then(async (res) => {
+                        if (String(url).indexOf('/api/state') !== -1) {
+                            await new Promise((go) => setTimeout(go, 3000));
+                        }
+                        return res;
+                    });
+                    window.__swaps = [];
+                    const watch = (id) => new MutationObserver(() => {
+                        window.__swaps.push(id + (document.getElementById(id).hidden
+                            ? ':hidden' : ':shown'));
+                    }).observe(document.getElementById(id),
+                        { attributes: true, attributeFilter: ['hidden'] });
+                    watch('party-off');
+                    watch('party-on');
+                }"""
+            )
+            # Wait past a tick of the one-second poll, so a request carrying
+            # the pre-party world is certainly on the wire when we click.
+            page.wait_for_timeout(1200)
+            page.click("#party-host")
+            page.wait_for_selector("#party-on:not([hidden])", timeout=20000)
+            page.wait_for_timeout(4500)     # the stale answers land in here
+            swaps = page.evaluate("window.__swaps")
+            assert swaps.count("party-on:shown") == 1, swaps
+            assert swaps.count("party-off:shown") == 0, swaps
+        finally:
+            browser.close()
+
+
+def test_the_coming_up_list_is_not_rebuilt_every_second(served):
+    """It is polled once a second and rarely changes; replacing the rows
+    each time is what makes the card twitch."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=party]")
+            page.click("#party-host")
+            page.wait_for_selector("#party-on:not([hidden])", timeout=20000)
+            page.wait_for_selector("#party-next li", timeout=20000)
+            page.evaluate(
+                """() => {
+                    window.__rebuilds = 0;
+                    new MutationObserver((records) => {
+                        window.__rebuilds += records.length;
+                    }).observe(document.getElementById('party-next'),
+                               { childList: true });
+                }"""
+            )
+            page.wait_for_timeout(4500)      # four polls or so
+            assert page.evaluate("window.__rebuilds") == 0
+        finally:
+            browser.close()
+
+
+def test_sitting_a_track_out_says_so_until_the_party_moves_on(served):
+    """Skip in a party stops the sound without moving your place. With
+    nothing said, it looks like the button did nothing at all."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=party]")
+            page.click("#party-host")
+            page.wait_for_selector("#party-on:not([hidden])", timeout=20000)
+
+            page.click("[data-panel=now]")
+            page.evaluate("document.getElementById('skip').disabled = false")
+            page.click("#skip")
+            assert page.is_visible("#toast")
+            assert "Sitting this one out" in page.inner_text("#toast")
+            # The kicker is upper-cased by the stylesheet.
+            assert page.inner_text("#now-kind").lower() == "sitting this one out"
+
+            # Still there after several polls - a timer must not take it away.
+            page.wait_for_timeout(5000)
+            assert page.is_visible("#toast")
+            assert "stay" in page.get_attribute("#toast", "class")
+
+            # And it can be waved away by hand.
+            page.click("#toast")
+            assert page.is_hidden("#toast")
+        finally:
+            browser.close()
+
+
+def test_the_sit_out_clears_when_the_party_moves_on(served):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=party]")
+            page.click("#party-host")
+            page.wait_for_selector("#party-on:not([hidden])", timeout=20000)
+            page.click("[data-panel=now]")
+            page.evaluate("document.getElementById('skip').disabled = false")
+            page.click("#skip")
+            assert page.is_visible("#toast")
+            # Leaving the party is the party moving on as far as this page is
+            # concerned: there is no item to sit out any more.
+            page.click("[data-panel=party]")
+            page.click("#party-leave")
+            page.wait_for_selector("#party-off:not([hidden])", timeout=20000)
+            # The sticky note is gone (what replaces it is the ordinary
+            # "left the party" toast, which times out by itself).
+            assert "stay" not in (page.get_attribute("#toast", "class") or "")
+            assert "sitting" not in page.inner_text("#toast").lower()
+            assert page.inner_text("#now-kind").lower() != "sitting this one out"
+        finally:
+            browser.close()

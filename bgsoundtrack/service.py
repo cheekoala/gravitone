@@ -731,8 +731,20 @@ class Session:
         self._party_note = note
         party_module.save_active(made, self.config_path)
         if self.running:
-            self.stop()          # the old schedule is not this one
-            self.start()
+            # The old schedule is not this one, so the engine has to be
+            # replaced. Hold on to what was playing *across* the swap rather
+            # than putting it back afterwards: a page polling once a second
+            # can easily land in the middle, and being told "nothing playing"
+            # for one poll is exactly the flinch this avoids. The new engine
+            # names its own first item a moment later.
+            playing = self._now
+            self.stop()
+            self._now = playing
+            try:
+                self.start()
+            except Exception:
+                self._now = None     # nothing took over; say so honestly
+                raise
 
     def leave_party(self) -> dict:
         self._party = None
@@ -793,6 +805,9 @@ class Session:
                 "label": found[0].member.label if found[0].member else "",
                 "into": found[1],
                 "duration": found[0].duration,
+                # The instant this item began, the same number on every
+                # machine in the party: an identity for "what is on now".
+                "at": made.epoch + found[0].at,
                 "here": bool(lined_up.path(found[0].member))
                 if found[0].member
                 else True,
