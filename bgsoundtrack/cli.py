@@ -8,6 +8,7 @@ import random
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 
 from bgsoundtrack import (
@@ -15,6 +16,7 @@ from bgsoundtrack import (
     config as config_module,
     engine,
     library,
+    party as party_module,
     player,
     playlists,
     transfer,
@@ -95,6 +97,109 @@ def cmd_unlink(args) -> int:
         how, target = library.remove_track(config, name, section=section, playlist=playlist)
         store.save()
         print(f"{how} {name}" + ("" if how == "unlinked" else f" (remembered for {playlist.name})"))
+    return 0
+
+
+def _party_session(args):
+    from bgsoundtrack import service
+
+    config, store, _ = _load(args)
+    return service.Session(config, _config_path(args), store=store)
+
+
+def _show_party(state: dict) -> None:
+    """The party, in the shape someone reads over a voice call."""
+    print(f"  code   {state['code']}")
+    if state["name"]:
+        print(f"  called {state['name']}")
+    started = time.strftime("%H:%M:%S", time.localtime(state["epoch"]))
+    print(f"  began  {started}  ({state['tracks']} tracks, {state['ambient']} ambient)")
+    now = state["now"]
+    if state["over"] or now is None:
+        print("  the party has finished")
+    elif now["kind"] == "track":
+        where = "" if now["here"] else "   (not on this machine - silence here)"
+        print(
+            f"  now    {now['label']}  {_fmt(now['into'])} of "
+            f"{_fmt(now['duration'])}{where}"
+        )
+    else:
+        left = now["duration"] - now["into"]
+        word = "ambience" if now["kind"] == "ambient" else "silence"
+        print(f"  now    {word}, {_fmt(left)} left")
+    for item in state["next"]:
+        at = time.strftime("%H:%M:%S", time.localtime(item["at"]))
+        label = item["label"] or item["kind"]
+        print(f"  {at}  {label}" + ("" if item["here"] else "  (missing here)"))
+    if state["missing"]:
+        print(
+            f"  {len(state['missing'])} track(s) of this party are not on this "
+            "machine; they play as silence:"
+        )
+        for label in state["missing"][:8]:
+            print(f"    - {label}")
+        if len(state["missing"]) > 8:
+            print(f"    ... and {len(state['missing']) - 8} more")
+
+
+def cmd_party(args) -> int:
+    """Listen along with someone else, with nothing between you but a code."""
+    session = _party_session(args)
+
+    if args.action == "new":
+        state = session.host_party(args.name or "")
+        print("party started - read this out, or paste it:")
+        print()
+        print(f"    {state['code']}")
+        print()
+        if args.save:
+            where = session.save_party_file(args.save)
+            print(f"party file written to {where}")
+            print("hand it over with the music; after that the code is enough.")
+        else:
+            print(
+                "if their library is not exactly this one, send them the party "
+                "file too:\n    bgst party save <path>"
+            )
+        return 0
+
+    if args.action == "join":
+        if not args.code and not args.file:
+            print("error: join needs a code, or --file", file=sys.stderr)
+            return 2
+        try:
+            state = session.join_party(args.code or "", args.file or "")
+        except party_module.PartyError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        print(f"joined. playing along in {session.playlist.name}:")
+        _show_party(state)
+        print()
+        print("start playing with 'bgst play' - it will drop you in mid-track.")
+        return 0
+
+    if args.action == "save":
+        try:
+            where = session.save_party_file(args.path)
+        except RuntimeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        print(f"wrote {where}")
+        return 0
+
+    if args.action == "leave":
+        if session.party_state() is None:
+            print("not in a party")
+            return 0
+        session.leave_party()
+        print("left the party - back to your own shuffle")
+        return 0
+
+    state = session.party_state()
+    if state is None:
+        print("not in a party. 'bgst party new' starts one.")
+        return 0
+    _show_party(state)
     return 0
 
 
@@ -369,6 +474,16 @@ def cmd_doctor(args) -> int:
         f"album art       {with_art} record(s) with art, "
         f"{len(remembered) - with_art} known to have none"
     )
+    joined = party_module.load_active(_config_path(args))
+    if joined is None:
+        print("party           not in one")
+    else:
+        began = time.strftime("%H:%M:%S", time.localtime(joined.epoch))
+        print(
+            f"party           {joined.code}, running since {began}, "
+            f"{len(joined.roster.music)} track(s)"
+        )
+
     if instance.process_is_stale():
         print(
             "update pending   bgst was installed again after this command's "
@@ -495,11 +610,21 @@ def cmd_play(args) -> int:
     signal.signal(signal.SIGTERM, lambda *_: controls.stop())
 
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
-    runner = engine.Engine(config, backend, rng=rng, controls=controls, store=store)
 
     from bgsoundtrack import tags as tag_reader
 
-    reader = tag_reader.Reader()
+    reader = tag_reader.Reader(tag_reader.cache_path(_config_path(args)))
+    # In a party the engine plays a timetable somebody else can work out too.
+    joined = party_module.load_active(_config_path(args))
+    runner = engine.Engine(
+        config,
+        backend,
+        rng=rng,
+        controls=controls,
+        store=store,
+        party=joined,
+        finder=lambda: party_module.here(config, playlist, reader),
+    )
 
     def label(path: Path) -> str:
         try:
@@ -520,7 +645,10 @@ def cmd_play(args) -> int:
             "" if config.hide_gaps or event.duration is None
             else f" ({_fmt(event.duration)})"
         )
-        if event.kind == "track":
+        if event.kind == "absent":
+            # In the party, not on this machine: it still takes its turn.
+            print(f"♪ {event.label}  (not here - silence){length}", flush=True)
+        elif event.kind == "track":
             print(f"♪ {label(event.path)}", flush=True)
         elif event.kind == "ambient":
             print(f"  ~ {label(event.path)}{length}", flush=True)
@@ -544,6 +672,12 @@ def cmd_play(args) -> int:
         controls.skip()
 
     interactive = sys.stdin.isatty() and not args.no_keys
+    if joined is not None:
+        where = time.strftime("%H:%M:%S", time.localtime(joined.epoch))
+        print(
+            f"in a party ({joined.code}), running since {where} - "
+            "skip sits a track out, it does not put you out of step"
+        )
     if interactive:
         print(
             f"playing {playlist.name} with {backend.name} - "
@@ -678,6 +812,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--name", help="name for the imported playlist (single ones only)")
     p.add_argument("--into", help="where to unpack a bundle's audio")
     p.set_defaults(func=cmd_import)
+
+    p = sub.add_parser(
+        "party", help="listen along with someone else, offline, from a code"
+    )
+    party_actions = p.add_subparsers(dest="action", required=True)
+    sp = party_actions.add_parser("new", help="start one on this playlist")
+    sp.add_argument("--name", help="what to call it")
+    sp.add_argument("--save", help="also write the party file here")
+    sp.set_defaults(func=cmd_party)
+    sp = party_actions.add_parser("join", help="join one with its code")
+    sp.add_argument("code", nargs="?", help="the code you were given")
+    sp.add_argument("--file", help="a party file, when the code alone is not enough")
+    sp.set_defaults(func=cmd_party)
+    sp = party_actions.add_parser("status", help="where the party has got to")
+    sp.set_defaults(func=cmd_party)
+    sp = party_actions.add_parser("save", help="write the party file to hand over")
+    sp.add_argument("path")
+    sp.set_defaults(func=cmd_party)
+    sp = party_actions.add_parser("leave", help="go back to your own shuffle")
+    sp.set_defaults(func=cmd_party)
 
     p = sub.add_parser("prune", help="drop symlinks whose target is gone")
     p.set_defaults(func=cmd_prune)

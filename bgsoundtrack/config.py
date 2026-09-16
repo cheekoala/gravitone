@@ -89,6 +89,11 @@ class Config:
     # better named than they are tagged.
     show_filenames: bool = True
 
+    # Nudge for a party, in seconds: added to this machine's clock when it
+    # works out where the party has got to. Both ends normally run NTP and
+    # need nothing, but a clock that is known to be a second out can say so.
+    party_offset: float = 0.0
+
     # Folders played in place. An alternative to linking: nothing is added to
     # the library folder, the tree is simply scanned every time it is needed,
     # so whatever you drop in there later is picked up on the next pass.
@@ -135,6 +140,8 @@ class Config:
             value = getattr(self, name)
             if not 0 <= value <= 100:
                 raise ValueError(f"{name} must be between 0 and 100")
+        if abs(self.party_offset) > 3600:
+            raise ValueError("party_offset must be within an hour")
         for name in ("music_sources", "ambient_sources"):
             if not isinstance(getattr(self, name), list):
                 raise ValueError(f"{name} must be a list of folders")

@@ -67,6 +67,10 @@
         <svg viewBox="0 0 24 24" class="icon"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6M9 14h6"/></svg>
         <span>Add</span>
       </button>
+      <button class="rail-btn" data-panel="party" title="Listen with someone else" role="tab">
+        <svg viewBox="0 0 24 24" class="icon"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9.5" r="2.4"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M15.5 19a4.4 4.4 0 0 1 5-4.3"/></svg>
+        <span>Party</span>
+      </button>
       <button class="rail-btn" data-panel="settings" title="Settings" role="tab">
         <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M21.2 12h-3M5.8 12h-3M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1M18.5 18.5l-2.1-2.1M7.6 7.6L5.5 5.5"/></svg>
         <span>Config</span>
@@ -108,6 +112,92 @@
         <div class="card">
           <div class="kicker">Recently played</div>
           <ul class="history" id="history"><li class="empty">Nothing yet</li></ul>
+        </div>
+      </section>
+
+      <!-- PARTY -->
+      <section class="panel" id="panel-party">
+        <div class="card" id="party-off">
+          <div class="kicker">Listen together</div>
+          <p class="hint">
+            Two machines, the same music at the same moment, with
+            <strong>nothing between them</strong> — no server, no connection, nothing
+            to keep alive. You both work the same evening out from the same code, so
+            closing the lid and coming back an hour later puts you straight back in
+            step rather than an hour behind.
+          </p>
+          <div class="party-choice">
+            <button class="primary" id="party-host">Start a party</button>
+            <button class="ghost" id="party-join-open">Join a party</button>
+          </div>
+          <form class="party-join" id="party-join" hidden>
+            <input type="text" id="party-code" placeholder="paste the code you were given"
+                   spellcheck="false" autocomplete="off" autocapitalize="characters">
+            <button class="primary small" type="submit">Join</button>
+            <button class="ghost small" type="button" id="party-open-file">Open a party file…</button>
+          </form>
+          <p class="hint" id="party-note" hidden></p>
+        </div>
+
+        <div class="card" id="party-on" hidden>
+          <div class="party-head">
+            <div>
+              <div class="kicker" id="party-kicker">In a party</div>
+              <div class="now-title" id="party-name">Party</div>
+            </div>
+            <button class="ghost small" id="party-leave">Leave</button>
+          </div>
+          <div class="code-block">
+            <code id="party-code-out">—</code>
+            <button class="ghost small" id="party-copy">Copy</button>
+          </div>
+          <p class="hint" id="party-since"></p>
+          <p class="hint">
+            Read that out, or paste it over. Whoever joins hears exactly what you
+            hear, from wherever they are — and there is nothing to keep open
+            between you.
+          </p>
+
+          <div class="party-now">
+            <div class="kicker" id="party-now-kind">Now</div>
+            <div class="now-title" id="party-now-title">—</div>
+            <div class="progress"><div class="progress-fill" id="party-progress"></div></div>
+          </div>
+
+          <div class="kicker">Coming up</div>
+          <ul class="history" id="party-next"><li class="empty">—</li></ul>
+
+          <div class="row-actions">
+            <button class="ghost small" id="party-save">Save party file…</button>
+            <button class="ghost small" id="party-nudge-back">Clock −0.5s</button>
+            <button class="ghost small" id="party-nudge-on">Clock +0.5s</button>
+          </div>
+          <p class="hint" id="party-offset" hidden></p>
+          <div id="party-missing" hidden>
+            <div class="kicker">Not on this machine</div>
+            <p class="hint">
+              These play as silence here, and the party runs on around them. Copy
+              them over and they join in at their next turn.
+            </p>
+            <ul class="history" id="party-missing-list"></ul>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="kicker">How it works</div>
+          <p class="hint">
+            The code carries the seed, the moment the party started and the gap
+            settings — everything but the music itself. If the other machine holds
+            exactly this playlist, the code is the whole handshake. If their library
+            is bigger, or differs at all, hand over the <strong>party file</strong>
+            once (next to the music you are sharing); after that the code alone
+            works.
+          </p>
+          <p class="hint">
+            In a party, <strong>skip</strong> sits a track out rather than moving the
+            queue — the sound stops, your place does not, and you are back with
+            everyone at the next track.
+          </p>
         </div>
       </section>
 

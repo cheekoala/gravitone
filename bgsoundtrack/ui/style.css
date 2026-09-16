@@ -167,6 +167,7 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   border-right: 1px solid var(--line); background: #0c0c0e;
 }
 .rail-btn {
+  position: relative;
   background: none; border: 1px solid transparent; border-radius: 10px;
   padding: 9px 4px; display: flex; flex-direction: column; align-items: center; gap: 5px;
   color: var(--muted); font-size: 10.5px; letter-spacing: .02em;
@@ -538,3 +539,66 @@ td.col-cover { padding-right: 0; }
   .field { grid-template-columns: 1fr; gap: 4px; }
   .field output { text-align: left; }
 }
+
+/* -- parties: a code, and where the evening has got to ------------------ */
+.party-choice { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.party-join { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.party-join input {
+  flex: 1 1 260px;
+  min-width: 0;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.party-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.code-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius);
+  background: rgba(20, 184, 143, .08);
+}
+.code-block code {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 15px;
+  letter-spacing: .08em;
+  color: #7ff0d0;
+  overflow-wrap: anywhere;
+}
+.party-now { margin: 14px 0 6px; }
+.party-now .progress { margin-top: 8px; }
+#party-next .when { color: var(--faint); font-family: var(--mono); font-size: 12px; margin-right: 8px; }
+#party-next .gone { color: var(--faint); font-style: italic; }
+@media (max-width: 620px) {
+  .code-block code { font-size: 13px; letter-spacing: .04em; }
+  .party-choice button, .party-join button { flex: 1 1 auto; }
+}
+/* A party is on: the rail says so from any panel. */
+.rail-btn.live-on { color: #7ff0d0; }
+.rail-btn.live-on::after {
+  content: "";
+  position: absolute;
+  top: 8px; right: 10px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(20, 184, 143, .18);
+}
+/* The one button on a card that is the point of the card. */
+.primary {
+  background: rgba(20, 184, 143, .14);
+  border: 1px solid var(--accent-dim);
+  color: #7ff0d0;
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-weight: 550;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.primary:hover:not(:disabled) { background: rgba(20, 184, 143, .22); border-color: var(--accent); }
+.primary:disabled { opacity: .4; cursor: not-allowed; }
+.primary.small { padding: 5px 12px; font-size: 12.5px; border-radius: 8px; }
