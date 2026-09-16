@@ -167,3 +167,67 @@ def test_the_table_header_is_filled_to_its_rounded_corners(served):
 
     assert corners["left"] >= corners["wrap"] - 1, "the header's fill squares off the panel corner"
     assert corners["right"] >= corners["wrap"] - 1
+
+
+# -- the party panel -----------------------------------------------------
+
+
+def test_starting_a_party_shows_a_code_you_can_read_out(served):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        problems = []
+        page.on("pageerror", lambda exc: problems.append(str(exc)))
+        try:
+            page.goto(served)
+            page.click("[data-panel=party]")
+            assert page.is_visible("#party-off")
+            page.click("#party-host")
+            page.wait_for_selector("#party-on:not([hidden])", timeout=20000)
+
+            code = page.inner_text("#party-code-out")
+            assert len(code.replace("-", "")) == 32
+            assert page.inner_text("#party-since").startswith("Started")
+            # It says what is on and what is next, without anyone asking.
+            assert page.inner_text("#party-now-title").strip()
+            assert page.locator("#party-next li").count() >= 1
+            # And the rail says a party is on from any panel.
+            page.click("[data-panel=now]")
+            assert "live-on" in page.get_attribute("[data-panel=party]", "class")
+
+            page.click("[data-panel=party]")
+            page.click("#party-leave")
+            page.wait_for_selector("#party-off:not([hidden])", timeout=20000)
+            assert problems == []
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize("width", [1400, 900, 390])
+def test_the_party_code_never_leaves_its_card(served, width):
+    """A 32-character code on a phone is exactly the sort of thing that
+    pushes a page sideways."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": width, "height": 800})
+        try:
+            page.goto(served)
+            page.click("[data-panel=party]")
+            page.click("#party-host")
+            page.wait_for_selector("#party-on:not([hidden])", timeout=20000)
+            measured = page.evaluate(
+                """() => {
+                    const code = document.getElementById('party-code-out');
+                    const card = document.getElementById('party-on');
+                    return {
+                      code: code.getBoundingClientRect().right,
+                      card: card.getBoundingClientRect().right,
+                      sideways: document.documentElement.scrollWidth
+                                > document.documentElement.clientWidth,
+                    };
+                }"""
+            )
+            assert measured["code"] <= measured["card"] + 1
+            assert measured["sideways"] is False
+        finally:
+            browser.close()

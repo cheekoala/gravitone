@@ -190,16 +190,32 @@
     $("transport").dataset.on = String(running);
     $("transport-label").textContent = running ? "Live" : "Play";
     $("skip").disabled = !running;
-    $("ban").disabled = !running || !now || now.kind === "silence";
+    // In a party, skipping mutes the rest of a track rather than moving the
+    // queue on: say so, so nobody fears it will put them out of step.
+    $("skip").title = next.party
+      ? "Sit this track out — you rejoin at the next one"
+      : "Next track";
+    // Nothing to ban when there is no file here to ban.
+    $("ban").disabled = !running || !now
+      || now.kind === "silence" || now.kind === "absent";
     // The armed confirm belongs to one track; if that track is gone, so is it.
     if (armed && (!now || now.name !== armed)) disarmBan();
 
+    renderParty(next);
+
     const nowPanel = $("panel-now");
+    // A track nobody here has is quiet in this room, so it reads as a gap -
+    // but it is still the party's track, and it is still named.
     const inGap = !!now && now.kind !== "track";
     nowPanel.classList.toggle("is-gap", inGap);
     // The server withholds gap times in hidden mode; there is nothing to show.
     nowPanel.classList.toggle("is-hidden", inGap && next.hidden);
-    const kinds = { track: "Now playing", ambient: "Ambience", silence: "Silence" };
+    const kinds = {
+      track: "Now playing",
+      ambient: "Ambience",
+      silence: "Silence",
+      absent: "Playing for them, not here",
+    };
     $("now-kind").textContent = now ? kinds[now.kind] : (running ? "Starting" : "Idle");
     $("now-title").textContent = now
       ? (now.kind === "silence" ? "Quiet" : (now.label || now.name))
@@ -1012,6 +1028,168 @@
     pendingTransfer = null;
     run(value);
   });
+
+  // -- parties --------------------------------------------------------
+
+  function partyNote(text, bad) {
+    const node = $("party-note");
+    node.hidden = !text;
+    node.textContent = text || "";
+    node.style.color = bad ? "var(--danger)" : "";
+  }
+
+  const timeOfDay = (stamp) =>
+    new Date(stamp * 1000).toLocaleTimeString([], {
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+
+  function renderParty(next) {
+    const party = next.party;
+    $("party-off").hidden = !!party;
+    $("party-on").hidden = !party;
+    document.querySelector('[data-panel="party"]').classList.toggle("live-on", !!party);
+    if (!party) return;
+
+    $("party-name").textContent = party.name || "Party";
+    $("party-kicker").textContent = party.over ? "Party finished" : "In a party";
+    $("party-code-out").textContent = party.code;
+    const size = `${party.tracks} track${party.tracks === 1 ? "" : "s"}`
+      + (party.ambient ? `, ${party.ambient} ambient` : "");
+    $("party-since").textContent = `Started ${timeOfDay(party.epoch)} · ${size}`;
+
+    const on = party.now;
+    const kinds = { track: "Now playing", ambient: "Ambience", silence: "Silence" };
+    $("party-now-kind").textContent = on ? kinds[on.kind] : "Over";
+    $("party-now-title").textContent = !on
+      ? "The party has finished"
+      : on.kind === "silence"
+        ? "Quiet"
+        : on.label + (on.here ? "" : " — not on this machine");
+    const done = on && on.duration ? Math.min(1, on.into / on.duration) : 0;
+    $("party-progress").style.width = `${(done * 100).toFixed(1)}%`;
+
+    const coming = $("party-next");
+    coming.replaceChildren();
+    (party.next || []).forEach((item) => {
+      const row = el("li");
+      row.appendChild(el("span", "when", timeOfDay(item.at)));
+      const what = item.kind === "silence" ? "silence"
+        : item.kind === "ambient" ? (item.label || "ambience")
+        : item.label;
+      row.appendChild(el("span", item.here ? "" : "gone",
+        what + (item.here ? "" : " (silence here)")));
+      coming.appendChild(row);
+    });
+    if (!coming.children.length) coming.appendChild(el("li", "empty", "—"));
+
+    const missing = party.missing || [];
+    $("party-missing").hidden = !missing.length;
+    if (missing.length) {
+      const list = $("party-missing-list");
+      list.replaceChildren();
+      missing.slice(0, 40).forEach((label) => list.appendChild(el("li", "gone", label)));
+      if (missing.length > 40) {
+        list.appendChild(el("li", "empty", `…and ${missing.length - 40} more`));
+      }
+    }
+    const offset = party.offset || 0;
+    $("party-offset").hidden = !offset;
+    $("party-offset").textContent = offset
+      ? `This machine's clock is nudged by ${offset > 0 ? "+" : ""}${offset.toFixed(1)}s.`
+      : "";
+  }
+
+  async function askPartyPath(kind, title, suggested) {
+    if (state && state.picker) {
+      partyNote("Waiting for the file dialog on the machine running bgst…");
+      const picked = await api("pick", { kind, title, suggested }).catch(() => null);
+      partyNote("");
+      if (picked && picked.available) return picked.paths[0] || null;
+    }
+    return undefined;
+  }
+
+  async function joinParty(body) {
+    const next = await call("party", { action: "join", ...body });
+    if (next) {
+      partyNote("");
+      $("party-join").hidden = true;
+      $("party-code").value = "";
+      toast("Joined the party");
+    }
+  }
+
+  $("party-host").addEventListener("click", (event) =>
+    withSpinner(event.currentTarget, async () => {
+      const next = await call("party", { action: "host" });
+      if (next) toast("Party started — send the code over");
+    }));
+
+  $("party-join-open").addEventListener("click", () => {
+    $("party-join").hidden = !$("party-join").hidden;
+    if (!$("party-join").hidden) $("party-code").focus();
+  });
+
+  $("party-join").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const code = $("party-code").value.trim();
+    if (!code) return;
+    joinParty({ code });
+  });
+
+  $("party-open-file").addEventListener("click", async () => {
+    const picked = await askPartyPath("files", "Choose the party file", "");
+    if (picked === undefined) {
+      partyNote("No file dialog here — paste the path to the party file in the box "
+        + "and press Join.");
+      return;
+    }
+    if (picked) joinParty({ path: picked });
+  });
+
+  $("party-leave").addEventListener("click", (event) =>
+    withSpinner(event.currentTarget, async () => {
+      await call("party", { action: "leave" });
+      toast("Left the party");
+    }));
+
+  $("party-copy").addEventListener("click", async () => {
+    const code = $("party-code-out").textContent;
+    try {
+      await navigator.clipboard.writeText(code);
+      toast("Code copied");
+    } catch (err) {
+      // No clipboard permission: select it so a manual copy is one keystroke.
+      const range = document.createRange();
+      range.selectNodeContents($("party-code-out"));
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      toast("Press ctrl/cmd-C to copy", true);
+    }
+  });
+
+  $("party-save").addEventListener("click", (event) =>
+    withSpinner(event.currentTarget, async () => {
+      const picked = await askPartyPath("save", "Save the party file", "bgst-party.json");
+      if (picked === undefined) {
+        askInline("Save party", "where to write bgst-party.json", async (path) => {
+          const next = await call("party", { action: "save", path });
+          if (next) toast(`Wrote ${next.result}`);
+        });
+        showPanel("settings");
+        return;
+      }
+      if (!picked) return;
+      const next = await call("party", { action: "save", path: picked });
+      if (next) toast(`Wrote ${next.result}`);
+    }));
+
+  [["party-nudge-back", -0.5], ["party-nudge-on", 0.5]].forEach(([id, step]) =>
+    $(id).addEventListener("click", async () => {
+      const now = (state && state.config.party_offset) || 0;
+      await call("config", { party_offset: Math.round((now + step) * 10) / 10 });
+    }));
 
   // -- wiring ---------------------------------------------------------
   function showPanel(name) {

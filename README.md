@@ -351,6 +351,112 @@ desktop's save/open dialog where there is one and a path box where there
 isn't. Import always **adds**: a name that already exists becomes
 `Hollow Kingdom (2)` rather than replacing anything.
 
+## Listening together
+
+Two machines, the same music at the same moment, with **nothing between
+them** — no server, no connection, nothing to keep alive. bgst does not
+stream and it does not follow: both ends work out the same evening from the
+same code.
+
+```sh
+bgst party new --save /nas/music/bgst-party.json   # start one, write the file
+bgst party join 07PW-8BJW-01NA-NA8J-RN5W-W03R-0714-27G7
+bgst party status                                  # where it has got to
+bgst party leave
+```
+
+or Party in the control panel: **Start a party** gives you a code to read
+out; **Join a party** takes one.
+
+### How it can possibly work
+
+A session is not a stream, it is a **timetable**, and the timetable is a pure
+function of three things: a **seed** (every choice the engine makes — the
+shuffle, how long a gap runs, whether it is silence or wind, where the wind
+starts — comes from one generator), a **roster** (the tracks, in an order
+both sides arrive at independently, with the lengths the party was planned
+against), and an **epoch** (the instant the first track started).
+
+Everything else is arithmetic. "What is playing at 21:47:12" has one answer,
+and two machines that agree on the clock agree on the music without ever
+speaking. Join at nine for a party that started at seven and you drop into
+the middle of the track everyone else is in the middle of. Close the lid for
+ten minutes and you come back *in step*, not ten minutes behind.
+
+Nothing drifts, either, because every item is pinned to an absolute instant
+rather than started when the last one happened to finish. A track that runs
+a second short just leaves a second more quiet — and since the gap between
+tracks is silence or weather anyway, the slop is inaudible. That is the one
+real advantage of a player built around long random gaps: it has shock
+absorbers.
+
+### The code, and the file
+
+The code is 32 characters in [Crockford's base32](https://www.crockford.com/base32.html)
+(no I, L, O or U, so nothing reads as something else down a voice call). It
+carries the seed, the epoch, a fingerprint of the roster, and **the settings
+that shape the gaps** — `gap_min`, `gap_max`, `ambient_chance`,
+`ambient_min_tail`, `ambient_random_start`, `shuffle` and `loop`. Those have
+to travel: the silences are part of the party, not a local preference.
+Volume, hidden mode and which player you use stay yours — they change nothing
+about when the next track starts.
+
+What the code cannot carry is 300 tracks, so the **party file** does. Put it
+next to the music you are already sharing; whoever takes it keeps the roster
+by fingerprint, and **from then on the code alone is enough**. You only need
+the file again when the set of tracks changes.
+
+If both libraries hold exactly the same playlist, even the first code works
+on its own — joining searches every playlist on the machine for one that
+matches, and switches to it.
+
+### Matching music, not paths
+
+A track is identified by what it *is*: its title, artist and album,
+normalised for case, accents and punctuation (and its file name when it has
+no tags). Not its path — the other person keeps their music somewhere else
+entirely — and not its bytes either, since re-tagging a file rewrites them
+without changing a note.
+
+So the two libraries need nothing in common but the music:
+
+- **Bigger on their side?** Their extra tracks are simply not in the party.
+- **Smaller?** What they lack plays as **silence** for them, for exactly as
+  long as it plays for you, and bgst names what is missing so they can copy
+  it over. Drop the files in mid-party and they join in at their next turn.
+- **Different folder layout, different file names, different tagger?** Fine.
+
+### Skipping, banning, and the lid
+
+In a party **skip sits a track out**: the sound stops, your place does not,
+and you are back with everyone at the next track. It cannot put you out of
+step, so there is no warning to click through. Ban is off for a track that
+is not on your machine, and a track you have banned simply plays as silence
+for you — the same rule as one you never had.
+
+Stopping and starting, restarting the server, or closing the laptop all
+leave the party alone: it is a timetable, and it is still running. `bgst
+party leave` is the way out.
+
+### Clocks
+
+Both ends normally run NTP and need nothing. The party's tolerance is the
+gap between tracks, so being a few hundred milliseconds out is not something
+anyone can hear. If a machine is known to be off, nudge it:
+
+```sh
+bgst config party_offset=-0.5      # this machine's clock reads half a second late
+```
+
+or the **Clock ±0.5s** buttons on the Party card.
+
+### What it does not do
+
+There is no way to skip *for everyone*, change the queue, or chat — that
+needs a connection, and the whole appeal here is that there isn't one. What
+you get instead is a party that survives a flat battery, a dropped VPN and a
+train tunnel.
+
 ## The library
 
 ```

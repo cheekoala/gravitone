@@ -253,3 +253,153 @@ def test_session_start_without_a_player_raises(config, monkeypatch):
 
 def _raise_no_player():
     raise player.PlaybackError("no audio player found")
+
+
+# -- parties: the same evening, worked out separately --------------------
+
+
+def party_roster(names=("a", "b", "c", "d"), seconds=30.0):
+    from bgsoundtrack import party
+
+    return party.Roster.of(
+        [
+            party.Member(
+                id=party.track_id(name, "Artist", "Album"),
+                duration=seconds,
+                title=name,
+                artist="Artist",
+                album="Album",
+                name=f"{name}.mp3",
+            )
+            for name in names
+        ],
+        [],
+    )
+
+
+def run_party(config, made, clock_start, seconds, have=None, controls=None):
+    """Play a party from `clock_start` for `seconds`, recording what sounds."""
+    backend = player.Backend(name="ffplay", executable="/usr/bin/ffplay")
+    clock = FakeClock()
+    clock.now = clock_start
+    heard = []
+    eng = engine.Engine(
+        config,
+        backend,
+        sleep=clock.sleep,
+        monotonic=clock.monotonic,
+        party=made,
+        finder=lambda: dict(have or {}),
+        now=lambda: made.epoch + clock.now,
+        controls=controls,
+    )
+
+    def watch(event):
+        if event.kind == "done":
+            return
+        heard.append(
+            (
+                round(clock.now, 3),
+                event.kind,
+                event.path.name if event.path else (event.label or "-"),
+                round(event.duration or 0, 3),
+                round(event.start or 0, 3),
+            )
+        )
+        if clock.now - clock_start >= seconds:
+            eng.controls.stop()
+
+    eng.run(on_event=watch)
+    return heard
+
+
+def test_two_machines_hear_the_same_thing_at_the_same_time(config, fake_player):
+    """One starts at the beginning, one walks in twenty minutes late."""
+    from bgsoundtrack import party
+
+    config.gap_min, config.gap_max, config.ambient_chance = 5, 15, 0.0
+    made = party.start(party_roster(), config, seed=4242, epoch=1_700_000_000)
+    have = {m.id: Path(f"/music/{m.name}") for m in made.roster.music}
+
+    host = run_party(config, made, 0.0, 1800, have)
+    guest = run_party(config, made, 1200.0, 600, have)
+
+    # The guest's first item is half over when they arrive; from the next one
+    # on, every single thing matches the host - same instant, same track,
+    # same length of quiet - with nothing having passed between them.
+    overlap = [row for row in host if row[0] >= guest[1][0] - 0.02]
+    shared = min(len(guest) - 1, len(overlap))
+    assert shared >= 10
+    for theirs, mine in zip(guest[1:1 + shared], overlap[:shared]):
+        assert theirs[1:3] == mine[1:3]              # same kind, same track
+        assert theirs[0] == pytest.approx(mine[0], abs=0.02)
+        assert theirs[3] == pytest.approx(mine[3], abs=0.02)
+    # ...and the guest really did walk in mid-item.
+    assert guest[0][4] > 0 or guest[0][3] < 30
+
+
+def test_a_track_you_do_not_have_holds_its_slot(config, fake_player):
+    """Silence for you, music for them, and the next track still on time."""
+    from bgsoundtrack import party
+
+    config.gap_min = config.gap_max = 10
+    config.ambient_chance = 0.0
+    made = party.start(party_roster(seconds=30.0), config, seed=7, epoch=1_700_000_000)
+    missing = made.roster.music[0]
+    have = {m.id: Path(f"/music/{m.name}") for m in made.roster.music if m.id != missing.id}
+
+    heard = run_party(config, made, 0.0, 300, have)
+    absent = [row for row in heard if row[1] == "absent"]
+    assert absent, "the missing track should still take its turn"
+    assert absent[0][2] == missing.label
+    assert absent[0][3] == 30.0                      # its whole length
+    starts = [row[0] for row in heard]
+    assert starts == sorted(starts)
+    # Every item begins where the one before it ended: nothing slid.
+    for (at, _, _, length, _), (next_at, *_) in zip(heard, heard[1:]):
+        assert next_at == pytest.approx(at + length)
+
+
+def test_skipping_in_a_party_sits_the_track_out(config, fake_player):
+    """The sound stops; the slot does not, so you rejoin at the next one."""
+    from bgsoundtrack import party
+
+    config.gap_min = config.gap_max = 10
+    config.ambient_chance = 0.0
+    made = party.start(party_roster(seconds=30.0), config, seed=5, epoch=1_700_000_000)
+    have = {m.id: Path(f"/music/{m.name}") for m in made.roster.music}
+
+    controls = engine.Controls()
+    controls.skip()                    # skip the moment it starts
+    heard = run_party(config, made, 0.0, 120, have, controls=controls)
+    for (at, _, _, length, _), (next_at, *_) in zip(heard, heard[1:]):
+        assert next_at == pytest.approx(at + length)
+
+
+def test_joining_late_seeks_into_the_track(config, fake_player):
+    from bgsoundtrack import party
+
+    config.gap_min = config.gap_max = 10
+    config.ambient_chance = 0.0
+    made = party.start(party_roster(seconds=60.0), config, seed=9, epoch=1_700_000_000)
+    have = {m.id: Path(f"/music/{m.name}") for m in made.roster.music}
+
+    run_party(config, made, 25.0, 5, have)
+    first = fake_player[0]
+    assert first["start"] == pytest.approx(25.0)
+    assert first["duration"] == pytest.approx(35.0)   # only what is left of it
+
+
+def test_a_party_ignores_the_local_shuffle_and_gap_settings(config, fake_player):
+    """The party's settings are the party's, or the gaps would not line up."""
+    from bgsoundtrack import party
+
+    config.gap_min = config.gap_max = 10
+    config.ambient_chance = 0.0
+    made = party.start(party_roster(seconds=30.0), config, seed=3, epoch=1_700_000_000)
+    have = {m.id: Path(f"/music/{m.name}") for m in made.roster.music}
+
+    config.gap_min, config.gap_max = 120, 240        # changed after joining
+    heard = run_party(config, made, 0.0, 200, have)
+    gaps = [row[3] for row in heard if row[1] == "silence"]
+    assert gaps and all(gap == 10 for gap in gaps)

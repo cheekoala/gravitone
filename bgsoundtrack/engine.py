@@ -7,6 +7,11 @@ The engine owns the shape of a session:
 Every gap is a random length between `gap_min` and `gap_max`. A gap is either
 silence, or an ambient bed (wind, rain, tavern noise) picked at random and cut
 to the gap length - `ambient_chance` decides which.
+
+In a **party** the engine stops rolling dice and reads a timetable instead
+(see `party.py`): the same shape, but every item pinned to an absolute
+instant that another machine has worked out identically. Nothing is played
+because the last thing finished - it is played because it is time.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from bgsoundtrack import library, player, playlists
+from bgsoundtrack import library, party as party_module, player, playlists
 from bgsoundtrack.config import Config
 
 
@@ -29,6 +34,9 @@ class Event:
     path: Path | None = None
     duration: float | None = None
     start: float | None = None  # where an ambient bed was started from
+    # What is playing when this machine has no file for it: in a party the
+    # slot is kept, and named, rather than skipped.
+    label: str | None = None
 
 
 class Controls:
@@ -74,9 +82,17 @@ class Engine:
         sleep=time.sleep,
         monotonic=time.monotonic,
         store: playlists.Store | None = None,
+        party: party_module.Party | None = None,
+        finder=None,
+        now=time.time,
     ):
         self.config = config
         self.backend = backend
+        # A party replaces every choice this engine would make with one
+        # already written down; `finder` says which of its tracks are here.
+        self.party = party
+        self.finder = finder or (lambda: {})
+        self._now = now
         # Which playlist is playing, and a version to notice edits by.
         self.store = store or playlists.Store(
             playlists=[library.resolve(config, None)]
@@ -148,6 +164,10 @@ class Engine:
         next track instead of the next full pass.
         """
         emit = on_event or (lambda event: None)
+        if self.party is not None:
+            self._run_party(emit)
+            emit(Event("done"))
+            return
         music: list[Path] = []
         ambient: list[Path] = []
         queue: list[Path] = []
@@ -205,6 +225,88 @@ class Engine:
 
         self._hold(None, None)
         emit(Event("done"))
+
+    # -- playing to a timetable ------------------------------------------
+
+    def _run_party(self, emit) -> None:
+        """Play what the party says, when the party says.
+
+        Every item is started against the wall clock and held until its
+        scheduled end, however the audio itself behaves. A file that runs
+        short leaves a little more quiet; one that is missing leaves quiet
+        for its whole slot. Neither moves anything that comes after, which is
+        what keeps two machines together without a word between them.
+        """
+        table = party_module.Timetable(self.party)
+        here: dict = {}
+        seen_version = None
+
+        while not self.controls.stopping:
+            if seen_version != self.store.version:
+                here = self.finder() or {}
+                seen_version = self.store.version
+            elapsed = self._now() + self.config.party_offset - self.party.epoch
+            found = table.at(elapsed)
+            if found is None:
+                break                       # the party is over
+            item, into = found
+            remaining = item.duration - into
+            if remaining <= 0.05:
+                # Landed on the seam between two items. Step over it by the
+                # width of the seam, not by a fixed slice: rounding an item
+                # boundary up to 50ms would start the next one that late.
+                self._sleep(max(remaining, 0.001))
+                continue
+            path = here.get(item.member.id) if item.member else None
+            playback = None
+            if item.kind == "track" and path is not None:
+                emit(Event("track", path=path, duration=remaining))
+                playback = player.play(
+                    self.backend,
+                    path,
+                    volume=self.config.volume,
+                    duration=remaining,
+                    start=into,
+                )
+                self._hold(playback, "track")
+            elif item.kind == "ambient" and path is not None:
+                start = item.seek + into
+                emit(Event("ambient", path=path, duration=remaining, start=start))
+                playback = player.play(
+                    self.backend,
+                    path,
+                    volume=self.config.ambient_volume,
+                    duration=remaining,
+                    start=start,
+                )
+                self._hold(playback, "ambient")
+            elif item.member is not None:
+                # In the party, not on this machine. It still takes its turn.
+                emit(Event("absent", duration=remaining, label=item.member.label))
+            else:
+                emit(Event("silence", duration=remaining))
+            self._wait_out(remaining, playback)
+        self._hold(None, None)
+
+    def _wait_out(self, seconds: float, playback: player.Playback | None) -> None:
+        """Hold a slot for its whole length, whatever the audio does.
+
+        Unlike the free-running loop, the end of the sound is not the end of
+        the item: stopping early is exactly how a party drifts apart. Skip
+        means sit this one out - the sound stops, the slot does not.
+        """
+        deadline = self._monotonic() + seconds
+        while True:
+            remaining = deadline - self._monotonic()
+            if remaining <= 0 or self.controls.stopping:
+                break
+            if self.controls.take_skip() and playback is not None:
+                playback.stop()
+                self._hold(None, None)
+                playback = None
+            self._sleep(min(0.2, remaining))
+        if playback is not None:
+            playback.stop()
 
     def _hold(self, playback: player.Playback | None, kind: str | None) -> None:
         self._playback, self._playing = playback, kind

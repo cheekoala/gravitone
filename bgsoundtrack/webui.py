@@ -337,6 +337,26 @@ class Handler(BaseHTTPRequestHandler):
                 session.forget_covers() if body.get("again") else session.find_covers()
             )
             return {**session.snapshot(), "result": result}
+        elif route == "party":
+            action = body.get("action", "")
+            # The result is worked out before the snapshot, or the snapshot
+            # would describe the moment before the party started.
+            if action == "host":
+                result = session.host_party(body.get("name", ""))
+                return {**session.snapshot(), "result": result}
+            if action == "join":
+                result = session.join_party(body.get("code", ""), body.get("path", ""))
+                return {**session.snapshot(), "result": result}
+            if action == "leave":
+                session.leave_party()
+                return session.snapshot()
+            if action == "save":
+                path = body.get("path")
+                if not path:
+                    raise ValueError("saving a party file needs a path")
+                result = session.save_party_file(path)
+                return {**session.snapshot(), "result": result}
+            raise ValueError(f"unknown party action {action!r}")
         elif route == "server":
             action = body.get("action", "")
             if action == "stop":

@@ -6,6 +6,7 @@ through this object. Everything here is safe to call from a request handler.
 
 from __future__ import annotations
 
+import json
 import os
 import random
 import threading
@@ -20,6 +21,7 @@ from bgsoundtrack import (
     engine,
     library,
     instance,
+    party as party_module,
     picker,
     player,
     playlists,
@@ -74,8 +76,10 @@ class Session:
         )
         self._art_pending = 0
         self._started = time.time()
-        self._started = time.time()
+        self._party: party_module.Party | None = None
+        self._party_note: str | None = None
         library.configure_index(self._index_path())
+        self._resume_party()
 
     # -- state -----------------------------------------------------------
 
@@ -162,6 +166,7 @@ class Session:
                 }
                 for item in self.store.playlists
             ],
+            "party": self.party_state(),
             "playlist": self.playlist.id,
             "removed": [
                 {"target": target, "name": Path(target).name}
@@ -323,6 +328,8 @@ class Session:
                 rng=random.Random(seed) if seed is not None else random.Random(),
                 controls=controls,
                 store=self.store,
+                party=self._party,
+                finder=self._party_finder,
             )
             self._controls = controls
             self._runner = runner
@@ -343,7 +350,9 @@ class Session:
         if event.kind == "done":
             self._now = None
             return
-        name = event.path.name if event.path else "silence"
+        # "absent": a track of the party that is not on this machine. It has
+        # no file here, but it does have a name, and the slot is still its own.
+        name = event.path.name if event.path else (event.label or "silence")
         self._now = NowPlaying(
             kind=event.kind,
             name=name,
@@ -639,6 +648,157 @@ class Session:
         self._art_pending = len(wanted)
         threading.Thread(target=work, daemon=True, name="bgst-art-scan").start()
         return len(wanted)
+
+    # -- parties ---------------------------------------------------------
+
+    def _party_path(self) -> Path:
+        return party_module.active_path(self.config_path)
+
+    def _party_finder(self) -> dict:
+        """Which of the party's tracks are here, rebuilt whenever the
+        playlist changes - so files copied over mid-party start playing at
+        their next turn."""
+        return party_module.here(self.config, self.playlist, self._tags)
+
+    def roster(self, playlist=None) -> party_module.Roster:
+        """A playlist as a roster - the same one on any machine holding it."""
+        self._read_tags_now(playlist)
+        return party_module.roster_of(
+            self.config, playlist or self.playlist, self._tags
+        )
+
+    def _read_tags_now(self, playlist=None) -> None:
+        waiting = len(
+            self._tags.pending(
+                [
+                    entry.target
+                    for section in library.SECTIONS
+                    for entry in library.entries(
+                        self.config, section, playlist or self.playlist
+                    )
+                ]
+            )
+        )
+        if not waiting:
+            return
+        self._tags_pending = waiting
+        try:
+            party_module.read_tags(self.config, playlist or self.playlist, self._tags)
+            self._tags_version += 1
+        finally:
+            self._tags_pending = 0
+
+    def host_party(self, name: str = "") -> dict:
+        """Open a party on this playlist and put this machine in it."""
+        made = party_module.start(
+            self.roster(), self.config, name=name or self.playlist.name
+        )
+        self._enter(made, "hosting")
+        return self.party_state()
+
+    def join_party(self, code: str = "", path: str = "") -> dict:
+        """Join by code, or by the file that carries a roster we lack."""
+        if path:
+            made = party_module.read_file(Path(path).expanduser())
+        else:
+            made = self._join_by_code(code)
+        self._enter(made, "joined")
+        return self.party_state()
+
+    def _join_by_code(self, code: str) -> party_module.Party:
+        """Find the music this code is about, among everything here.
+
+        The playlist on show is tried first, then every other one - somebody
+        who imported a shared library is almost certainly holding it as its
+        own playlist next to their own music - and joining switches to it.
+        A roster kept from an earlier party settles the rest.
+        """
+        wanted = party_module.decode(code)["fingerprint"]
+        for item in [self.playlist] + [
+            other for other in self.store.playlists if other.id != self.playlist.id
+        ]:
+            found = self.roster(item)
+            if found.fingerprint != wanted:
+                continue
+            if item.id != self.playlist.id:
+                self.select_playlist(item.id)
+            return party_module.join(code, roster=found, config_file=self.config_path)
+        return party_module.join(code, config_file=self.config_path)
+
+    def _enter(self, made: party_module.Party, note: str) -> None:
+        party_module.save_roster(made.roster, self.config_path)
+        self._party = made
+        self._party_note = note
+        party_module.save_active(made, self.config_path)
+        if self.running:
+            self.stop()          # the old schedule is not this one
+            self.start()
+
+    def leave_party(self) -> dict:
+        self._party = None
+        self._party_note = None
+        party_module.save_active(None, self.config_path)
+        if self.running:
+            self.stop()
+            self.start()
+        return self.party_state()
+
+    def _resume_party(self) -> None:
+        """Pick the party back up after a restart - it is still going on."""
+        self._party = party_module.load_active(self.config_path)
+        if self._party is not None:
+            self._party_note = "rejoined"
+
+    def save_party_file(self, path: str) -> str:
+        """The file to hand over, so a code alone works from then on."""
+        if self._party is None:
+            raise RuntimeError("no party is running - start one first")
+        return str(party_module.write_file(self._party, Path(path).expanduser()))
+
+    def party_state(self) -> dict | None:
+        """What the UI shows: the code, where the party has got to, what is
+        missing here."""
+        made = self._party
+        if made is None:
+            return None
+        table = party_module.Timetable(made)
+        elapsed = time.time() + self.config.party_offset - made.epoch
+        found = table.at(elapsed)
+        lined_up = party_module.match(made.roster, self._party_finder())
+        coming = []
+        for item in table.upcoming(max(0.0, elapsed), count=4)[1:]:
+            coming.append(
+                {
+                    "kind": item.kind,
+                    "label": item.member.label if item.member else "",
+                    "at": made.epoch + item.at,
+                    "here": bool(lined_up.path(item.member)) if item.member else True,
+                }
+            )
+        return {
+            "code": made.code,
+            "name": made.name,
+            "note": self._party_note,
+            "epoch": made.epoch,
+            "started": made.epoch,
+            "tracks": len(made.roster.music),
+            "ambient": len(made.roster.ambient),
+            "missing": [m.label for m in lined_up.missing],
+            "over": found is None,
+            "offset": self.config.party_offset,
+            "now": None
+            if found is None
+            else {
+                "kind": found[0].kind,
+                "label": found[0].member.label if found[0].member else "",
+                "into": found[1],
+                "duration": found[0].duration,
+                "here": bool(lined_up.path(found[0].member))
+                if found[0].member
+                else True,
+            },
+            "next": coming,
+        }
 
     def pick(
         self, kind: str = "folder", title: str = "Choose a folder", suggested: str = ""

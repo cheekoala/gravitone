@@ -586,3 +586,208 @@ def test_history_catches_up_when_tags_arrive(server, tmp_path):
 
     session._tags.store(song, tags.Tags(title="Song", artist="Artist"))
     assert request(httpd, "/api/state")["history"] == ["Song — Artist"]
+
+
+# -- parties -------------------------------------------------------------
+
+
+def with_music(config, session, names=("01 Song.mp3", "02 Other.mp3", "03 Third.mp3")):
+    """A playlist with tags already read, as a party needs."""
+    from bgsoundtrack import library, tags
+
+    made = []
+    folder = library.section_dir(config, "music", session.playlist)
+    folder.mkdir(parents=True, exist_ok=True)
+    for index, name in enumerate(names):
+        real = folder / name
+        real.write_bytes(b"\0")
+        session._tags.store(
+            real,
+            tags.Tags(
+                title=name.split(" ", 1)[1].removesuffix(".mp3"),
+                artist="Jeremy Soule",
+                album="Morrowind",
+                duration=60.0 + index * 10,
+            ),
+        )
+        made.append(real)
+    library.SCANNER.refresh_now(folder)
+    library.SCANNER.wait(5)
+    return made
+
+
+def elsewhere(tmp_path):
+    """A config dir of its own: the other machine shares nothing but the code."""
+    directory = tmp_path / "their machine"
+    directory.mkdir(exist_ok=True)
+    return directory / "config.json"
+
+
+def test_no_party_is_the_normal_state(server):
+    httpd, session, config, tmp_path = server
+    assert request(httpd, "/api/state")["party"] is None
+
+
+def test_hosting_a_party_gives_a_code_and_says_what_is_in_it(server):
+    httpd, session, config, tmp_path = server
+    with_music(config, session)
+    state = request(httpd, "/api/party", {"action": "host", "name": "Morrowind night"})
+    party = state["party"]
+    assert party["name"] == "Morrowind night"
+    assert len(party["code"].replace("-", "")) == 32
+    assert party["tracks"] == 3
+    assert party["missing"] == []
+    assert party["now"]["here"] is True
+
+
+def test_a_second_machine_joins_with_the_code_alone(server, tmp_path):
+    """Same music, different folders: the code is the whole handshake."""
+    from bgsoundtrack import library
+    from bgsoundtrack.config import Config
+    from bgsoundtrack.service import Session
+
+    httpd, session, config, _ = server
+    with_music(config, session)
+    code = request(httpd, "/api/party", {"action": "host"})["party"]["code"]
+
+    # Their machine: the same tracks, somewhere else entirely.
+    theirs = Config(root=str(tmp_path / "their library"))
+    library.init(theirs)
+    other = Session(theirs, elsewhere(tmp_path))
+    with_music(theirs, other)
+
+    joined = other.join_party(code)
+    assert joined["code"] == code
+    assert joined["missing"] == []
+    assert joined["now"]["label"] == request(httpd, "/api/state")["party"]["now"]["label"]
+
+
+def test_a_bigger_library_on_the_other_side_still_joins(server, tmp_path):
+    """Their extra music is simply not in the party.
+
+    A code alone cannot say *which* three of their four tracks are in it, so
+    the party file does - and once it has, the code is enough from then on.
+    """
+    from bgsoundtrack import library
+    from bgsoundtrack.config import Config
+    from bgsoundtrack.service import Session
+
+    httpd, session, config, _ = server
+    with_music(config, session)
+    made = request(httpd, "/api/party", {"action": "host"})["party"]
+    saved = tmp_path / "party.json"
+    request(httpd, "/api/party", {"action": "save", "path": str(saved)})
+
+    theirs = Config(root=str(tmp_path / "their library"))
+    library.init(theirs)
+    other = Session(theirs, elsewhere(tmp_path))
+    with_music(theirs, other)
+    with_music(theirs, other, names=("09 Something Else.mp3",))
+
+    joined = other.join_party(path=str(saved))
+    assert joined["missing"] == []
+    assert joined["tracks"] == 3            # the party is still the party
+    assert joined["code"] == made["code"]
+
+    # And the roster is kept, so the next code needs no file at all.
+    again = Session(theirs, other.config_path)
+    assert again.join_party(made["code"])["tracks"] == 3
+
+
+def test_joining_finds_the_playlist_the_party_is_about(server, tmp_path):
+    """Their own music is one playlist, the shared library another."""
+    from bgsoundtrack import library
+    from bgsoundtrack.config import Config
+    from bgsoundtrack.service import Session
+
+    httpd, session, config, _ = server
+    with_music(config, session)
+    code = request(httpd, "/api/party", {"action": "host"})["party"]["code"]
+
+    theirs = Config(root=str(tmp_path / "their library"))
+    library.init(theirs)
+    other = Session(theirs, elsewhere(tmp_path))
+    with_music(theirs, other, names=("77 My Own Thing.mp3",))   # their playlist
+    shared = other.add_playlist("Morrowind from the NAS")
+    other.select_playlist(shared)
+    with_music(theirs, other)                                   # the shared one
+    other.select_playlist(other.store.playlists[0].id)          # back to theirs
+
+    joined = other.join_party(code)
+    assert joined["missing"] == []
+    assert other.playlist.name == "Morrowind from the NAS"
+
+
+def test_a_smaller_library_joins_and_is_told_what_it_lacks(server, tmp_path):
+    from bgsoundtrack import library
+    from bgsoundtrack.config import Config
+    from bgsoundtrack.service import Session
+
+    httpd, session, config, _ = server
+    with_music(config, session)
+    made = request(httpd, "/api/party", {"action": "host"})["party"]
+    saved = tmp_path / "party.json"
+    request(httpd, "/api/party", {"action": "save", "path": str(saved)})
+
+    theirs = Config(root=str(tmp_path / "their library"))
+    library.init(theirs)
+    other = Session(theirs, elsewhere(tmp_path))
+    with_music(theirs, other, names=("01 Song.mp3",))
+
+    joined = other.join_party(path=str(saved))
+    assert joined["code"] == made["code"]
+    assert len(joined["missing"]) == 2
+    assert "Other" in " ".join(joined["missing"])
+
+
+def test_a_code_for_unknown_music_asks_for_the_party_file(server, tmp_path):
+    from bgsoundtrack import library
+    from bgsoundtrack.config import Config
+    from bgsoundtrack.service import Session
+
+    httpd, session, config, _ = server
+    with_music(config, session)
+    code = request(httpd, "/api/party", {"action": "host"})["party"]["code"]
+
+    theirs = Config(root=str(tmp_path / "empty library"))
+    library.init(theirs)
+    (theirs.music_dir / "unrelated.mp3").write_bytes(b"\0")
+    other = Session(theirs, elsewhere(tmp_path))
+    with pytest.raises(Exception) as raised:
+        other.join_party(code)
+    assert "party file" in str(raised.value)
+
+
+def test_leaving_a_party_puts_things_back(server):
+    httpd, session, config, _ = server
+    with_music(config, session)
+    request(httpd, "/api/party", {"action": "host"})
+    assert request(httpd, "/api/state")["party"] is not None
+    assert request(httpd, "/api/party", {"action": "leave"})["party"] is None
+
+
+def test_a_party_survives_the_server_restarting(server, tmp_path):
+    """The party is still going on; this machine just stepped out."""
+    from bgsoundtrack.service import Session
+
+    httpd, session, config, _ = server
+    with_music(config, session)
+    code = request(httpd, "/api/party", {"action": "host"})["party"]["code"]
+
+    again = Session(config, session.config_path)
+    assert again.party_state()["code"] == code
+    assert again.party_state()["note"] == "rejoined"
+
+
+def test_the_party_says_what_is_coming(server):
+    httpd, session, config, _ = server
+    with_music(config, session)
+    party = request(httpd, "/api/party", {"action": "host"})["party"]
+    assert party["next"]
+    assert {item["kind"] for item in party["next"]} <= {"track", "ambient", "silence"}
+    assert all("at" in item for item in party["next"])
+
+
+def test_an_unknown_party_action_is_a_clear_error(server):
+    with pytest.raises(urllib.error.HTTPError):
+        request(server[0], "/api/party", {"action": "conga"})
