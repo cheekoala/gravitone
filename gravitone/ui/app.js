@@ -67,6 +67,28 @@
     }
   }
 
+  const playingKey = () =>
+    state && state.now ? `${state.now.kind}|${state.now.name}` : null;
+
+  async function untilTheMusicMoves(button, work, cap = 5000) {
+    const before = playingKey();
+    return withSpinner(button, async () => {
+      const done = await work();
+      const started = performance.now();
+      // The sound is faded out before it stops, so the answer to "skip"
+      // arrives well before the skip is audible. Keep spinning until the
+      // player says something else is on - and ask more often than once a
+      // second while waiting, or the button spins for a second longer than
+      // the music takes.
+      while (performance.now() - started < cap) {
+        if (playingKey() !== before) break;
+        await new Promise((go) => setTimeout(go, 150));
+        await poll();
+      }
+      return done;
+    });
+  }
+
   async function api(route, body, quiet) {
     if (!SERVED) throw new Error("not served by gravitone");
     if (!quiet) busy(1);
@@ -89,6 +111,120 @@
         || `HTTP ${res.status}`);
     }
     return payload;
+  }
+
+  // -- the playing clock ------------------------------------------------
+  //
+  // A poll is a fix, not a frame. Between fixes the bar keeps moving at the
+  // rate the music is actually playing at, which is one second per second,
+  // and every answer from the server pulls it back onto the truth. The
+  // alternative is a bar that lurches a second, then four.
+
+  let clockFix = null;     // { elapsed, duration, at, hidden, playing }
+
+  function anchor(now, hidden) {
+    if (!now) {
+      clockFix = null;
+      paintClock();
+      return;
+    }
+    const elapsed = now.elapsed == null ? null : now.elapsed;
+    const fix = {
+      elapsed,
+      duration: now.duration || 0,
+      at: performance.now(),
+      hidden,
+      // A gap runs down on its own; a track only moves while it is playing.
+      playing: !!(state && state.running),
+    };
+    // Snapping back a fraction of a second every poll looks worse than the
+    // jitter it fixes, so a fix that agrees with where we already are is
+    // taken as confirmation and the clock keeps running.
+    if (clockFix && Math.abs(reading().elapsed - elapsed) < 1.2
+        && clockFix.duration === fix.duration && clockFix.hidden === fix.hidden) {
+      clockFix.duration = fix.duration;
+      clockFix.playing = fix.playing;
+      paintClock();
+      return;
+    }
+    clockFix = fix;
+    paintClock();
+  }
+
+  function reading() {
+    if (!clockFix || clockFix.elapsed == null) return { elapsed: 0, duration: 0 };
+    const ran = clockFix.playing ? (performance.now() - clockFix.at) / 1000 : 0;
+    const elapsed = clockFix.duration
+      ? Math.min(clockFix.duration, clockFix.elapsed + ran)
+      : clockFix.elapsed + ran;
+    return { elapsed, duration: clockFix.duration };
+  }
+
+  function paintClock() {
+    if (!clockFix) {
+      $("now-progress").style.width = "0%";
+      $("now-elapsed").textContent = "0:00";
+      $("now-remaining").textContent = "";
+      return;
+    }
+    if (clockFix.hidden || clockFix.elapsed == null) {
+      $("now-progress").style.width = "100%";
+      $("now-elapsed").textContent = "— — —";
+      $("now-remaining").textContent = "hidden";
+      return;
+    }
+    const { elapsed, duration } = reading();
+    $("now-progress").style.width = duration
+      ? `${Math.min(100, (elapsed / duration) * 100)}%` : "0%";
+    $("now-elapsed").textContent = clock(elapsed);
+    $("now-remaining").textContent = duration ? `-${clock(duration - elapsed)}` : "";
+  }
+
+  function runClock() {
+    paintClock();
+    requestAnimationFrame(runClock);
+  }
+
+  // Rebuilt only when it changes: this is painted once a second, and the
+  // last dozen tracks rarely differ between two polls.
+  let historyShape = null;
+
+  function renderHistory(played) {
+    const seen = (played || []).slice().reverse();
+    const shape = JSON.stringify(seen);
+    if (shape === historyShape) return;
+    historyShape = shape;
+
+    const list = $("history");
+    list.replaceChildren();
+    if (!seen.length) {
+      list.append(el("li", "empty", "Nothing yet"));
+      return;
+    }
+    seen.forEach((row) => {
+      const line = el("li", row.removed ? "played gone" : "played");
+      line.append(el("span", "played-name", row.label));
+      line.title = row.name;
+
+      const button = el("button", "played-act");
+      button.title = row.removed
+        ? "Put it back in this playlist"
+        : "Take it out of this playlist";
+      button.setAttribute("aria-label", button.title);
+      button.append(glyph(row.removed ? ICON.undo : ICON.cross, "icon"));
+      button.addEventListener("click", () => withSpinner(button, async () => {
+        const done = row.removed
+          ? await call("restore-track", { target: row.target })
+          : await call("remove-track", { name: row.name });
+        if (!done) return;
+        invalidate();
+        toast(row.removed
+          ? `${row.label} is back in the playlist`
+          : `${row.label} is out of this playlist`);
+      }));
+      line.append(button);
+      list.append(line);
+    });
   }
 
   function toast(message, bad, stay) {
@@ -199,9 +335,9 @@
     const name = armed;
     disarmBan();
     if (!name) return;
-    // Name it explicitly: by now the track may have moved on, and banning
+    // Name it explicitly: by now the track may have moved on, and removing
     // whatever happens to be playing is not what was asked for.
-    const done = await call("ban", { name });
+    const done = await untilTheMusicMoves($("ban"), () => call("ban", { name }));
     if (!done) return;
     invalidate();
     toast(done.result.how === "unlinked"
@@ -225,12 +361,19 @@
     const { config, now, running } = next;
 
     $("root-path").textContent = shortPath(config.root, 44);
+    if (next.links) {
+      $("links-path").textContent = next.links;
+      $("links-path").title = next.links;
+    }
     // The word on the button is what pressing it does. Whether anything is
     // live is a state, and states belong on a badge, not on a button.
     $("transport").dataset.on = String(running);
     $("transport-label").textContent = running ? "Stop" : "Play";
     $("transport").title = running ? "Stop playing" : "Start playing";
     $("live-badge").hidden = !running;
+    // The record turns while it is playing. It is the one thing on the page
+    // that says "still going" without anyone having to read it.
+    document.querySelector('[data-panel="now"]').classList.toggle("turning", running);
     $("skip").disabled = !running;
     // In a party, skipping mutes the rest of a track rather than moving the
     // queue on: say so, so nobody fears it will put them out of step.
@@ -279,21 +422,15 @@
     $("now-sub").title = now ? now.name : "";
     renderCover(now);
     const hiddenNow = inGap && next.hidden;
-    const pct = now && now.duration ? Math.min(100, (now.elapsed / now.duration) * 100) : 0;
-    $("now-progress").style.width = hiddenNow ? "100%" : `${pct}%`;
-    $("now-elapsed").textContent = hiddenNow ? "— — —" : (now ? clock(now.elapsed) : "0:00");
-    $("now-remaining").textContent = hiddenNow
-      ? "hidden"
-      : (now && now.duration ? `-${clock(now.duration - now.elapsed)}` : "");
+    // The server is asked once a second and does not always answer on the
+    // beat. Rather than jerk the bar forward by whatever arrived, take each
+    // answer as a fix on the clock and run between fixes ourselves.
+    anchor(now, hiddenNow);
 
     $("stat-gap").textContent = next.hidden ? "hidden" : humanGap(config);
     $("stat-ambient").textContent = `${Math.round(config.ambient_chance * 100)}%`;
 
-    const history = $("history");
-    history.replaceChildren();
-    const seen = next.history.slice().reverse();
-    if (!seen.length) history.append(el("li", "empty", "Nothing yet"));
-    seen.forEach((name) => history.append(el("li", null, name)));
+    renderHistory(next.history);
 
     renderSortPickers(next);
     renderPlaylistPicker(next);
@@ -883,6 +1020,8 @@
     folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
     folderOpen: '<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
     chevron: '<path d="m9 18 6-6-6-6"/>',
+    cross: '<path d="M18 6 6 18"/> <path d="m6 6 12 12"/>',
+    undo: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/> <path d="M21 3v5h-5"/> <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/> <path d="M8 16H3v5"/>',
     track: '<path d="M11.65 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v10.35"/> <path d="M14 2v5a1 1 0 0 0 1 1h5"/> <path d="M8 20v-7l3 1.474"/> <circle cx="6" cy="20" r="2"/>',
   };
 
@@ -1425,9 +1564,9 @@
     if ($("toast").classList.contains("stay")) hideToast();
   });
 
-  $("skip").addEventListener("click", () => {
+  $("skip").addEventListener("click", (event) => {
     sitOut();
-    call("skip", {});
+    untilTheMusicMoves(event.currentTarget, () => call("skip", {}));
   });
   $("ban").addEventListener("click", toggleBan);
   $("ban-confirm").addEventListener("click", confirmBan);
@@ -1522,6 +1661,34 @@
         toast(done.result
           ? `Reading ${done.result} record(s) again`
           : "Nothing to read");
+      }
+    }));
+
+  $("links-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("links-path").textContent);
+      toast("Path copied");
+    } catch (err) {
+      const range = document.createRange();
+      range.selectNodeContents($("links-path"));
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+      toast("Press ctrl/cmd-C to copy", true);
+    }
+  });
+
+  $("mirror").addEventListener("click", (event) =>
+    withSpinner(event.currentTarget, async () => {
+      const done = await call("mirror", {});
+      if (!done) return;
+      const { linked, where } = done.result;
+      $("mirror-note").hidden = false;
+      $("mirror-note").textContent = linked
+        ? `Laid out ${linked} track(s) as links in ${where}`
+        : `Every track here already has a link in ${where}`;
+      if (linked) {
+        invalidate();
+        toast(`${linked} track(s) now have links of their own`);
       }
     }));
 
@@ -1633,5 +1800,6 @@
   } else {
     poll();
     setInterval(poll, 1000);
+    requestAnimationFrame(runClock);
   }
 })();

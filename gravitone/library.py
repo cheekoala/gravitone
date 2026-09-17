@@ -399,12 +399,33 @@ def remove_track(
     raise LibraryError(f"not in this playlist: {name}")
 
 
-def restore_track(config: Config, target: str, playlist: Playlist | None = None) -> Path:
-    """Undo a removal, putting a source track back in the rotation."""
+def restore_track(
+    config: Config,
+    target: str,
+    playlist: Playlist | None = None,
+    section: str = "music",
+) -> Path:
+    """Undo a removal, whichever kind of removal it was.
+
+    A track from a folder was only *remembered* as removed, so it comes back
+    by forgetting that. A linked track lost its link, so it comes back by
+    being linked again - which is the same thing from where you are standing,
+    and means nothing you take out of the recently-played list is gone for
+    good.
+    """
     playlist = resolve(config, playlist)
     path = Path(target).expanduser()
-    if not playlist.include(path):
-        raise LibraryError(f"was not removed from this playlist: {path}")
+    if playlist.include(path):
+        invalidate_cache()
+        return path
+    if not path.exists():
+        raise LibraryError(f"the file is no longer there: {path}")
+    if any(entry.target == path for entry in entries(config, section, playlist)):
+        return path                     # already back; nothing to undo
+    result = link(config, [path], section=section, playlist=playlist, recursive=False)
+    if not result.linked:
+        why = result.skipped[0][1] if result.skipped else "could not link it"
+        raise LibraryError(f"could not put {path.name} back: {why}")
     invalidate_cache()
     return path
 

@@ -385,6 +385,24 @@
           </div>
         </div>
         <div class="card">
+          <div class="kicker">This playlist on disk</div>
+          <p class="hint">
+            Every linked track is a symlink in this folder, so the playlist is
+            browsable in your own file manager as well as in here. A folder
+            added whole plays in place and leaves nothing behind —
+            <strong>Mirror as links</strong> lays those tracks out here too,
+            without copying a byte or changing what plays.
+          </p>
+          <div class="code-block">
+            <code id="links-path">—</code>
+            <button class="ghost small" id="links-copy">Copy</button>
+          </div>
+          <div class="row-actions">
+            <button class="ghost small" id="mirror">Mirror as links</button>
+          </div>
+          <p class="hint" id="mirror-note" hidden></p>
+        </div>
+        <div class="card">
           <div class="kicker">Server</div>
           <div class="server-facts">
             <div class="fact"><span class="k">Address</span><span class="v" id="srv-url">—</span></div>

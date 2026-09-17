@@ -686,3 +686,27 @@ td.col-cover { padding-right: 0; }
   /* A taller row wants a little more air around the text beside it. */
   tbody td { padding-top: 7px; padding-bottom: 7px; }
 }
+
+/* -- the record turns while it plays -------------------------------- */
+.rail-btn.turning .icon { animation: spin 4.5s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .rail-btn.turning .icon { animation: none; }
+}
+
+/* -- recently played ------------------------------------------------ */
+.history li.played {
+  display: flex; align-items: center; gap: 8px;
+  padding-right: 2px;
+}
+.played-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history li.gone .played-name { text-decoration: line-through; color: var(--faint); }
+.played-act {
+  flex: none; background: none; border: 1px solid transparent; border-radius: 7px;
+  padding: 3px; color: var(--faint); display: flex; opacity: 0;
+  transition: opacity .12s ease;
+}
+.played-act .icon { width: 14px; height: 14px; }
+.history li:hover .played-act, .played-act:focus-visible { opacity: 1; }
+.played-act:hover { color: #ffa8ab; border-color: rgba(229,72,77,.4); background: rgba(229,72,77,.1); }
+.history li.gone .played-act:hover { color: #7ff0d0; border-color: var(--accent-dim); background: rgba(20,184,143,.1); }
+@media (hover: none) { .played-act { opacity: 1; } }

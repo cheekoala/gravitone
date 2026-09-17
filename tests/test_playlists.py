@@ -182,8 +182,40 @@ def test_restore_puts_a_removed_track_back(config, tmp_path):
     library.invalidate_cache()
     assert [e.name for e in library.entries(config, "music", playlist)] == ["a.mp3"]
 
-    with pytest.raises(library.LibraryError):
-        library.restore_track(config, str(album / "a.mp3"), playlist=playlist)
+    # Restoring something that is already back is not an error; it is what
+    # you asked for, and it has happened.
+    library.restore_track(config, str(album / "a.mp3"), playlist=playlist)
+    assert [e.name for e in library.entries(config, "music", playlist)] == ["a.mp3"]
+
+
+def test_a_track_whose_link_was_deleted_can_still_be_put_back(config, tmp_path):
+    """Nothing taken out of the recently-played list is gone for good."""
+    store = playlists.Store()
+    playlist = store.add("Mix")
+    library.init(config, playlist)
+    album = make_album(tmp_path / "album", "a.mp3")
+    library.link(config, [album / "a.mp3"], playlist=playlist)
+    library.invalidate_cache()
+
+    how, target = library.remove_track(config, "a.mp3", playlist=playlist)
+    library.invalidate_cache()
+    assert how == "unlinked"
+    assert library.entries(config, "music", playlist) == []
+
+    library.restore_track(config, str(target), playlist=playlist)
+    library.invalidate_cache()
+    back = library.entries(config, "music", playlist)
+    assert [e.name for e in back] == ["a.mp3"]
+    assert back[0].path.is_symlink()      # linked again, not copied
+
+
+def test_a_track_whose_file_has_gone_cannot_be_put_back(config, tmp_path):
+    store = playlists.Store()
+    playlist = store.add("Mix")
+    library.init(config, playlist)
+    with pytest.raises(library.LibraryError) as raised:
+        library.restore_track(config, str(tmp_path / "vanished.mp3"), playlist=playlist)
+    assert "no longer there" in str(raised.value)
 
 
 def test_removing_something_not_in_the_playlist_errors(config):

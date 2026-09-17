@@ -60,7 +60,10 @@ class Session:
         self._controls: engine.Controls | None = None
         self._now: NowPlaying | None = None
         self._error: str | None = None
-        self._history: list[str] = []
+        # (what was played, the file behind it). The second is worked out
+        # while the link still exists: take the track out of the playlist and
+        # the link goes, and a dangling path cannot be resolved afterwards.
+        self._history: list[tuple] = []
         self._backend: player.Backend | None = None
         self._picker_available: bool | None = None
         self._runner: engine.Engine | None = None
@@ -149,7 +152,7 @@ class Session:
             "art_pending": self._art_pending,
             "started": self._started,
             "pid": os.getpid(),
-            "history": [self._label(Path(item)) for item in self._history[-12:]],
+            "history": [self._played(item) for item in self._history[-12:]],
             "now": None if now is None else self._describe(now),
             "hidden": self.config.hide_gaps,
             "config": self.config.to_dict(),
@@ -168,11 +171,53 @@ class Session:
             ],
             "party": self.party_state(),
             "playlist": self.playlist.id,
+            # Where this playlist's symlinks live, so the UI can point a file
+            # manager at it.
+            "links": self.links_dir(),
             "removed": [
                 {"target": target, "name": Path(target).name}
                 for target in self.playlist.excluded
             ],
         }
+
+    def _played(self, item: tuple) -> dict:
+        """One line of the recently-played list, and what can be done to it.
+
+        The path is kept rather than a label, so a tag read that lands later
+        fixes the history too - and so a row can still act on the track.
+
+        "Removed" means it is not in the playlist any more, however it left:
+        remembered as removed, or unlinked. Both come back the same way.
+        """
+        played, target = item
+        path = Path(played)
+        real = Path(target)
+        return {
+            "label": self._label(path),
+            "name": path.name,
+            "target": str(real),
+            "removed": str(real) not in self._members_now(),
+        }
+
+    def _members_now(self) -> set:
+        """Every track this playlist plays, by real path. Memoised - the
+        recently-played list asks about a dozen of them every second."""
+        key = (
+            self.store.version,
+            library.SCANNER.version,
+            self.playlist.id,
+            len(self.playlist.excluded),
+        )
+        found = getattr(self, "_members", None)
+        if found and found[0] == key:
+            return found[1]
+        here = {
+            str(entry.target)
+            for section in library.SECTIONS
+            for entry in library.entries(self.config, section, self.playlist)
+        }
+        self._members = (key, here)
+        return here
 
     @staticmethod
     def _real(path: Path) -> Path:
@@ -362,7 +407,7 @@ class Session:
         if event.kind == "track":
             # Keep the path: the label is worked out when it is shown, so a
             # tag read that lands a second later fixes the history too.
-            self._history.append(str(event.path))
+            self._history.append((str(event.path), str(self._real(event.path))))
             self._probe_async(self._real(event.path), self._now)
         if event.path:
             self._art.want(event.path)   # resolves the link itself
@@ -455,8 +500,10 @@ class Session:
         self.store.touch()
         return {"how": how, "target": str(target), "name": name}
 
-    def restore_track(self, target: str) -> str:
-        path = library.restore_track(self.config, target, playlist=self.playlist)
+    def restore_track(self, target: str, section: str = "music") -> str:
+        path = library.restore_track(
+            self.config, target, playlist=self.playlist, section=section
+        )
         self.store.save()
         self.store.touch()
         return str(path)
@@ -663,6 +710,37 @@ class Session:
         thread.join(timeout=timeout)
         return not thread.is_alive()
 
+    def links_dir(self, section: str = "music") -> str:
+        """Where this playlist's symlinks live, for opening in a file manager."""
+        return str(library.section_dir(self.config, section, self.playlist))
+
+    def mirror(self) -> dict:
+        """Give every track in this playlist a symlink of its own.
+
+        A folder added whole plays in place and leaves nothing on disk, which
+        is tidy until you go looking for the playlist in a file manager and
+        find an empty directory. This lays the whole thing out as links, so
+        the folder is the playlist - browsable, sortable, and yours.
+        """
+        made, already = 0, 0
+        for section in library.SECTIONS:
+            wanted = [
+                entry.target
+                for entry in library.entries(self.config, section, self.playlist)
+                if entry.origin != "link"
+            ]
+            if not wanted:
+                continue
+            result = library.link(
+                self.config, wanted, section, playlist=self.playlist, recursive=False
+            )
+            made += len(result.linked)
+            already += sum(1 for _, why in result.skipped if "already" in why)
+        if made:
+            library.invalidate_cache()
+            self.store.touch()
+        return {"linked": made, "already": already, "where": self.links_dir()}
+
     # -- parties ---------------------------------------------------------
 
     def _party_path(self) -> Path:
@@ -671,8 +749,34 @@ class Session:
     def _party_finder(self) -> dict:
         """Which of the party's tracks are here, rebuilt whenever the
         playlist changes - so files copied over mid-party start playing at
-        their next turn."""
-        return party_module.here(self.config, self.playlist, self._tags)
+        their next turn.
+
+        Memoised: this is walked for every poll of the party card, and a
+        library of a few hundred tracks costs 40ms to walk. Nothing about it
+        changes unless the playlist or the tags do.
+        """
+        key = (
+            self.store.version,
+            library.SCANNER.version,
+            self.playlist.id,
+            len(self.playlist.excluded),
+            self._tags_version,
+        )
+        found = getattr(self, "_party_here", None)
+        if found and found[0] == key:
+            return found[1]
+        here = party_module.here(self.config, self.playlist, self._tags)
+        self._party_here = (key, here)
+        return here
+
+    def _party_table(self, made) -> party_module.Timetable:
+        """The party's timetable, kept rather than rebuilt for every poll."""
+        found = getattr(self, "_party_plan", None)
+        if found and found[0] is made:
+            return found[1]
+        table = party_module.Timetable(made)
+        self._party_plan = (made, table)
+        return table
 
     def roster(self, playlist=None) -> party_module.Roster:
         """A playlist as a roster - the same one on any machine holding it."""
@@ -787,7 +891,7 @@ class Session:
         made = self._party
         if made is None:
             return None
-        table = party_module.Timetable(made)
+        table = self._party_table(made)
         elapsed = time.time() + self.config.party_offset - made.epoch
         found = table.at(elapsed)
         lined_up = party_module.match(made.roster, self._party_finder())
