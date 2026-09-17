@@ -3,15 +3,15 @@ import os
 
 import pytest
 
-from bgsoundtrack import config as config_module
-from bgsoundtrack.cli import main
-from bgsoundtrack.config import Config
+from gravitone import config as config_module
+from gravitone.cli import main
+from gravitone.config import Config
 
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("BGSOUNDTRACK_CONFIG", str(tmp_path / "config.json"))
-    monkeypatch.setenv("BGSOUNDTRACK_ROOT", str(tmp_path / "custom soundtrack"))
+    monkeypatch.setenv("GRAVITONE_CONFIG", str(tmp_path / "config.json"))
+    monkeypatch.setenv("GRAVITONE_ROOT", str(tmp_path / "custom soundtrack"))
     return tmp_path
 
 
@@ -85,7 +85,7 @@ def test_cli_config_rejects_bad_assignment(env, capsys):
 
 
 def test_cli_play_without_music_fails_cleanly(env, capsys, monkeypatch):
-    from bgsoundtrack import player
+    from gravitone import player
 
     monkeypatch.setattr(
         player, "detect", lambda preferred=None: player.Backend("ffplay", "/bin/true")
@@ -142,7 +142,7 @@ def test_cli_folder_add_list_remove(env, tmp_path, capsys):
 
 def _store():
     """The playlist store as it is on disk right now."""
-    from bgsoundtrack import playlists
+    from gravitone import playlists
 
     return playlists.load(config_module.load())
 
@@ -159,7 +159,7 @@ def test_cli_list_marks_folder_tracks(env, tmp_path, capsys):
 
 
 def test_picker_reports_unavailable_without_tk(monkeypatch):
-    from bgsoundtrack import picker
+    from gravitone import picker
 
     monkeypatch.setattr(picker.subprocess, "run", _no_tk)
     result = picker.pick("folder")
@@ -176,3 +176,49 @@ def _no_tk(*args, **kwargs):
         stderr = "ModuleNotFoundError: No module named 'tkinter'"
 
     return Done()
+
+
+# -- the name it had before ---------------------------------------------
+
+
+def test_the_old_config_folder_is_adopted_not_abandoned(tmp_path, monkeypatch):
+    """A rename that loses somebody's library is not a rename, it is a wipe."""
+    from gravitone import config as config_module
+
+    old = tmp_path / "bgsoundtrack"
+    (old / "covers").mkdir(parents=True)
+    (old / "config.json").write_text('{"volume": 42}')
+    (old / "covers" / "found.jpg").write_bytes(b"\xff\xd8\xff")
+    (old / "tags.json").write_text("{}")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("GRAVITONE_CONFIG", raising=False)
+
+    assert config_module.adopt_old_config() == old
+    new = tmp_path / "gravitone"
+    assert (new / "config.json").read_text() == '{"volume": 42}'
+    assert (new / "covers" / "found.jpg").exists()
+    assert not old.exists()
+    assert config_module.load(new / "config.json").volume == 42
+
+
+def test_a_folder_under_the_new_name_is_left_alone(tmp_path, monkeypatch):
+    from gravitone import config as config_module
+
+    old = tmp_path / "bgsoundtrack"
+    old.mkdir()
+    (old / "config.json").write_text('{"volume": 1}')
+    new = tmp_path / "gravitone"
+    new.mkdir()
+    (new / "config.json").write_text('{"volume": 99}')
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    assert config_module.adopt_old_config() is None
+    assert config_module.load(new / "config.json").volume == 99
+    assert old.exists()          # and the old one is not touched either
+
+
+def test_nothing_to_adopt_is_not_an_error(tmp_path, monkeypatch):
+    from gravitone import config as config_module
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert config_module.adopt_old_config() is None

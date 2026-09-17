@@ -1,4 +1,4 @@
-from bgsoundtrack.cli import main
+from gravitone.cli import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -1,4 +1,4 @@
-// bgst UI - plain ES2019, no build step, no network beyond this server.
+// gravitone UI - plain ES2019, no build step, no network beyond this server.
 (() => {
   "use strict";
 
@@ -6,12 +6,12 @@
   // reopening the bare address (a bookmark, a restored tab) still works.
   const remember = (value) => {
     try {
-      if (value) localStorage.setItem("bgst-token", value);
+      if (value) localStorage.setItem("gravitone-token", value);
     } catch (err) { /* private window, blocked storage - not important */ }
   };
   const recall = () => {
     try {
-      return localStorage.getItem("bgst-token") || "";
+      return localStorage.getItem("gravitone-token") || "";
     } catch (err) {
       return "";
     }
@@ -68,7 +68,7 @@
   }
 
   async function api(route, body, quiet) {
-    if (!SERVED) throw new Error("not served by bgst");
+    if (!SERVED) throw new Error("not served by gravitone");
     if (!quiet) busy(1);
     try {
       return await request(route, body);
@@ -80,7 +80,7 @@
   async function request(route, body) {
     const res = await fetch(`/api/${route}`, {
       method: body === undefined ? "GET" : "POST",
-      headers: { "X-BGST-Token": TOKEN, "Content-Type": "application/json" },
+      headers: { "X-Gravitone-Token": TOKEN, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const payload = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -146,8 +146,8 @@
       // The usual cause of an unknown setting is a page newer than the
       // server that is serving it.
       toast(/unknown setting/i.test(err.message)
-        ? `${err.message} — this page is newer than the bgst running it. `
-          + `Restart it: bgst ui --stop, then bgst ui.`
+        ? `${err.message} — this page is newer than the gravitone running it. `
+          + `Restart it: gravitone ui --stop, then gravitone ui.`
         : err.message, true);
       return null;
     }
@@ -312,8 +312,8 @@
     if (next.stale) {
       offline(
         "The version still running is the old one, so this page and it no longer "
-        + "agree — restart it: bgst ui --stop, then bgst ui.",
-        "bgst was updated."
+        + "agree — restart it: gravitone ui --stop, then gravitone ui.",
+        "gravitone was updated."
       );
     } else if (!$("offline").hidden && failures === 0) {
       $("offline").hidden = true;
@@ -871,7 +871,33 @@
   }
 
   // -- add panel ------------------------------------------------------
-  async function browse(path) {
+  // -- the file browser -------------------------------------------------
+  //
+  // Linking needs real filesystem paths, which a browser's file input will
+  // never hand over, so the picker is served from our own side. It is the
+  // only place in the app where you are looking at a disk rather than a
+  // library, so it behaves like a file manager: where you have been, where
+  // you are, and what is inside a folder without having to go into it.
+
+  const ICON = {
+    folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+    folderOpen: '<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
+    chevron: '<path d="m9 18 6-6-6-6"/>',
+    track: '<path d="M11.65 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v10.35"/> <path d="M14 2v5a1 1 0 0 0 1 1h5"/> <path d="M8 20v-7l3 1.474"/> <circle cx="6" cy="20" r="2"/>',
+  };
+
+  const glyph = (markup, cls) => {
+    const holder = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    holder.setAttribute("viewBox", "0 0 24 24");
+    holder.setAttribute("class", cls || "icon");
+    holder.innerHTML = markup;
+    return holder;
+  };
+
+  const trail = [];          // where we have been, for Back
+  let browseData = null;
+
+  async function browse(path, remember = true) {
     let data;
     try {
       data = await api(`browse${path ? `?path=${encodeURIComponent(path)}` : ""}`);
@@ -879,10 +905,12 @@
       $("browser").replaceChildren(el("li", "empty", err.message));
       return;
     }
+    if (remember && browsePath && browsePath !== data.path) trail.push(browsePath);
     browsePath = data.path;
-    $("crumb").textContent = data.path;
-    $("crumb").title = data.path;
+    browseData = data;
     $("path-input").value = "";
+    $("browse-back").disabled = !trail.length;
+    $("browse-up").disabled = !data.parent;
 
     const shortcuts = $("shortcuts");
     shortcuts.replaceChildren();
@@ -890,6 +918,19 @@
       const chip = el("button", "chip", shortcut.name);
       chip.addEventListener("click", () => browse(shortcut.path));
       shortcuts.append(chip);
+    });
+
+    // Every step of the path is a way back, not just the one above.
+    const crumb = $("crumb");
+    crumb.replaceChildren();
+    (data.crumbs || []).forEach((step, index) => {
+      // The root is already a slash; a separator before it reads as "//".
+      if (index > 1) crumb.append(el("span", "sep", "/"));
+      const hop = el("button", "crumb-step", step.name);
+      hop.title = step.path;
+      if (index === data.crumbs.length - 1) hop.classList.add("here");
+      hop.addEventListener("click", () => browse(step.path));
+      crumb.append(hop);
     });
 
     const list = $("browser");
@@ -900,48 +941,132 @@
     list.append(
       folderRow(`This folder → ${playlistName || "playlist"} · ${section}`, data.path, true)
     );
-
-    if (data.parent) {
-      const up = el("li");
-      up.append(el("div", "t-body", "↑  Parent folder"));
-      up.addEventListener("click", () => browse(data.parent));
-      list.append(up);
+    data.dirs.forEach((dir) => list.append(dirRow(dir, 0)));
+    data.files.forEach((file) => list.append(fileRow(file, 0)));
+    if (!data.dirs.length && !data.files.length) {
+      list.append(el("li", "empty", "No folders or audio here"));
     }
-    data.dirs.forEach((dir) => {
-      const row = folderRow(`📁 ${dir.name}`, dir.path, false);
-      if (dir.audio) row.insertBefore(el("span", "badge", `${dir.audio} audio`), row.lastChild);
-      row.addEventListener("click", () => browse(dir.path));
-      list.append(row);
+  }
+
+  function counts(dir) {
+    const parts = [];
+    if (dir.audio) parts.push(`${dir.audio} track${dir.audio === 1 ? "" : "s"}`);
+    if (dir.folders) parts.push(`${dir.folders} folder${dir.folders === 1 ? "" : "s"}`);
+    return parts.join(" · ");
+  }
+
+  function rowButtons(path) {
+    const buttons = el("div", "row-buttons");
+    const folderButton = el("button", "add", "Add folder");
+    folderButton.title = "Put this whole folder in the playlist, played where it stands";
+    folderButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      addSource(path);
     });
-    data.files.forEach((file) => {
-      const row = el("li");
-      const body = el("div", "t-body");
-      body.append(el("div", "t-name", `♪ ${file.name}`));
-      const add = el("button", "add", "Link");
-      add.addEventListener("click", (event) => { event.stopPropagation(); link(file.path); });
-      row.append(body, add);
-      list.append(row);
+    const linkButton = el("button", "source-btn", "Link files");
+    linkButton.title = "Link the audio files that are in here now, one by one";
+    linkButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      link(path);
     });
-    if (!data.dirs.length && !data.files.length) list.append(el("li", "empty", "No folders or audio here"));
+    buttons.append(folderButton, linkButton);
+    return buttons;
+  }
+
+  function dirRow(dir, depth) {
+    const row = el("li", "dir");
+    row.style.setProperty("--depth", depth);
+    row.dataset.path = dir.path;
+
+    // The twisty opens the folder where it stands; the name goes into it.
+    const twisty = el("button", "twisty");
+    twisty.title = "Show what is inside, without leaving here";
+    twisty.append(glyph(ICON.chevron, "icon"));
+    twisty.disabled = !dir.folders && !dir.audio;
+    twisty.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleBranch(row, dir, depth);
+    });
+
+    const body = el("div", "t-body");
+    const name = el("div", "t-name");
+    name.append(glyph(ICON.folder, "icon folder-icon"), el("span", null, dir.name));
+    body.append(name);
+    const note = counts(dir);
+    if (note) body.append(el("div", "t-target", note));
+    body.addEventListener("click", () => browse(dir.path));
+
+    row.append(twisty, body, rowButtons(dir.path));
+    return row;
+  }
+
+  function fileRow(file, depth) {
+    const row = el("li", "file");
+    row.style.setProperty("--depth", depth);
+    const body = el("div", "t-body");
+    const name = el("div", "t-name");
+    name.append(glyph(ICON.track, "icon track-icon"), el("span", null, file.name));
+    body.append(name);
+    const add = el("button", "add", "Link");
+    add.addEventListener("click", (event) => {
+      event.stopPropagation();
+      link(file.path);
+    });
+    row.append(body, add);
+    return row;
+  }
+
+  async function toggleBranch(row, dir, depth) {
+    if (row.classList.contains("open")) {
+      closeBranch(row);
+      return;
+    }
+    row.classList.add("open", "loading");
+    let data;
+    try {
+      data = await api(`browse?path=${encodeURIComponent(dir.path)}`, undefined, true);
+    } catch (err) {
+      row.classList.remove("open", "loading");
+      toast(err.message, true);
+      return;
+    }
+    row.classList.remove("loading");
+    if (!row.isConnected) return;     // the listing was rebuilt underneath us
+    const made = [
+      ...data.dirs.map((child) => dirRow(child, depth + 1)),
+      ...data.files.map((child) => fileRow(child, depth + 1)),
+    ];
+    if (!made.length) {
+      const empty = el("li", "empty branch", "Nothing in here");
+      empty.style.setProperty("--depth", depth + 1);
+      made.push(empty);
+    }
+    made.forEach((child) => child.classList.add("branch-of"));
+    let after = row;
+    made.forEach((child) => {
+      after.after(child);
+      after = child;
+    });
+    row.branch = made;
+  }
+
+  function closeBranch(row) {
+    row.classList.remove("open");
+    (row.branch || []).forEach((child) => {
+      if (child.classList.contains("dir")) closeBranch(child);
+      child.remove();
+    });
+    row.branch = null;
   }
 
   function folderRow(label, path, showPath) {
-    const row = el("li");
+    const row = el("li", "here");
     const body = el("div", "t-body");
-    body.append(el("div", "t-name", label));
+    const name = el("div", "t-name");
+    name.append(glyph(ICON.folderOpen, "icon folder-icon"), el("span", null, label));
+    body.append(name);
     if (showPath) body.append(el("div", "t-target", shortPath(path)));
-    const buttons = el("div", "row-buttons");
-
-    const folderButton = el("button", "add", "Add folder");
-    folderButton.title = "Put this whole folder in the playlist, played where it stands";
-    folderButton.addEventListener("click", (event) => { event.stopPropagation(); addSource(path); });
-
-    const linkButton = el("button", "source-btn", "Link files");
-    linkButton.title = "Link the audio files that are in here now, one by one";
-    linkButton.addEventListener("click", (event) => { event.stopPropagation(); link(path); });
-
-    buttons.append(folderButton, linkButton);
-    row.append(body, buttons);
+    row.append(body, rowButtons(path));
     return row;
   }
 
@@ -967,7 +1092,7 @@
     button.disabled = true;
     button.textContent = "Waiting for the chooser…";
     try {
-      const picked = await api("pick", { kind: "folder", title: `Choose a ${section} folder for bgst` });
+      const picked = await api("pick", { kind: "folder", title: `Choose a ${section} folder for gravitone` });
       if (!picked.available) {
         toast(`No system chooser here (${picked.reason || "no Tk"}) — browse below instead`, true);
       } else if (picked.paths.length) {
@@ -992,7 +1117,7 @@
   }
 
   // -- export & import --------------------------------------------------
-  const EXPORT_NAMES = { json: "bgst-library.json", csv: "bgst-library.csv", bundle: "bgst-bundle.zip" };
+  const EXPORT_NAMES = { json: "gravitone-library.json", csv: "gravitone-library.csv", bundle: "gravitone-bundle.zip" };
 
   function transferNote(text, bad) {
     const note = $("transfer-note");
@@ -1004,7 +1129,7 @@
   async function askForPath(kind, title, suggested) {
     // The desktop dialog when there is one; otherwise the little path box.
     if (state && state.picker) {
-      transferNote("Waiting for the file dialog on the machine running bgst…");
+      transferNote("Waiting for the file dialog on the machine running gravitone…");
       const picked = await api("pick", { kind, title, suggested }).catch(() => null);
       transferNote("");
       if (picked && picked.available) return picked.paths[0] || null;
@@ -1063,7 +1188,7 @@
     })));
 
   $("import-file").addEventListener("click", async () => {
-    const picked = await askForPath("files", "Choose a bgst export to import", "");
+    const picked = await askForPath("files", "Choose a gravitone export to import", "");
     if (picked === undefined) {
       askInline("Import", "path to a .json or .zip export", doImport);
       return;
@@ -1167,7 +1292,7 @@
 
   async function askPartyPath(kind, title, suggested) {
     if (state && state.picker) {
-      partyNote("Waiting for the file dialog on the machine running bgst…");
+      partyNote("Waiting for the file dialog on the machine running gravitone…");
       const picked = await api("pick", { kind, title, suggested }).catch(() => null);
       partyNote("");
       if (picked && picked.available) return picked.paths[0] || null;
@@ -1237,9 +1362,9 @@
 
   $("party-save").addEventListener("click", (event) =>
     withSpinner(event.currentTarget, async () => {
-      const picked = await askPartyPath("save", "Save the party file", "bgst-party.json");
+      const picked = await askPartyPath("save", "Save the party file", "gravitone-party.json");
       if (picked === undefined) {
-        askInline("Save party", "where to write bgst-party.json", async (path) => {
+        askInline("Save party", "where to write gravitone-party.json", async (path) => {
           const next = await call("party", { action: "save", path });
           if (next) toast(`Wrote ${next.result}`);
         });
@@ -1256,6 +1381,15 @@
       const now = (state && state.config.party_offset) || 0;
       await call("config", { party_offset: Math.round((now + step) * 10) / 10 });
     }));
+
+  $("browse-back").addEventListener("click", () => {
+    const back = trail.pop();
+    if (back) browse(back, false);
+  });
+  $("browse-up").addEventListener("click", () => {
+    if (browseData && browseData.parent) browse(browseData.parent);
+  });
+  $("browse-home").addEventListener("click", () => browse(null));
 
   // -- wiring ---------------------------------------------------------
   function showPanel(name) {
@@ -1367,7 +1501,7 @@
   $("srv-stop").addEventListener("click", (event) =>
     withSpinner(event.currentTarget, async () => {
       await call("server", { action: "stop" });
-      offline("Start it again with: bgst ui", "The server was stopped from here.");
+      offline("Start it again with: gravitone ui", "The server was stopped from here.");
     }));
 
   $("find-covers").addEventListener("click", (event) =>
@@ -1449,6 +1583,18 @@
       if (box) { event.preventDefault(); box.focus(); box.select(); }
       return;
     }
+    if (panel === "add") {
+      if (event.key === "Backspace" && !$("browse-back").disabled) {
+        event.preventDefault();
+        $("browse-back").click();
+        return;
+      }
+      if (event.key === "ArrowUp" && event.altKey) {
+        event.preventDefault();
+        $("browse-up").click();
+        return;
+      }
+    }
     if (event.key === " ") { event.preventDefault(); call("toggle", {}); }
     if (event.key === "n") { sitOut(); call("skip", {}); }
     // R for remove; B still works for anyone who learnt it as "ban".
@@ -1473,10 +1619,10 @@
       } else if (++failures > 2) {
         offline(
           /token/i.test(err.message)
-            ? "This page's key is out of date — open the link bgst printed, or run 'bgst ui' again."
+            ? "This page's key is out of date — open the link gravitone printed, or run 'gravitone ui' again."
             : `${err.message}. It may have stopped, or been updated while running — `
-              + `restart it: bgst ui --stop, then bgst ui.`,
-          /token/i.test(err.message) ? "That key is not valid." : "Lost the bgst server."
+              + `restart it: gravitone ui --stop, then gravitone ui.`,
+          /token/i.test(err.message) ? "That key is not valid." : "Lost the gravitone server."
         );
       }
     }

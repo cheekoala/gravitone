@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=bgst
+Name=Gravitone
 GenericName=Game Soundtrack Player
-Comment=Play a custom soundtrack with ambient or silent gaps between songs
-Exec=bgst ui
+Comment=Your own soundtrack for any game, with silence or weather between the songs
+Exec=gravitone ui
 Terminal=false
 Categories=AudioVideo;Audio;Player;
 Keywords=music;soundtrack;ambient;game;
 StartupNotify=true
-Icon=multimedia-audio-player
+Icon=gravitone

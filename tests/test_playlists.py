@@ -4,14 +4,14 @@ import json
 
 import pytest
 
-from bgsoundtrack import config as config_module, library, playlists
-from bgsoundtrack.config import Config
+from gravitone import config as config_module, library, playlists
+from gravitone.config import Config
 
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("BGSOUNDTRACK_CONFIG", str(tmp_path / "config.json"))
-    monkeypatch.setenv("BGSOUNDTRACK_ROOT", str(tmp_path / "custom soundtrack"))
+    monkeypatch.setenv("GRAVITONE_CONFIG", str(tmp_path / "config.json"))
+    monkeypatch.setenv("GRAVITONE_ROOT", str(tmp_path / "custom soundtrack"))
     return tmp_path
 
 
@@ -197,7 +197,7 @@ def test_removing_something_not_in_the_playlist_errors(config):
 
 def test_engine_rebuilds_its_queue_when_the_playlist_changes(config, tmp_path, monkeypatch):
     """Switching playlist has to land on the next track, not the next pass."""
-    from bgsoundtrack import engine, player
+    from gravitone import engine, player
 
     store = playlists.Store()
     one, two = store.add("One"), store.add("Two")

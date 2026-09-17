@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-from bgsoundtrack import party
-from bgsoundtrack.config import Config
+from gravitone import party
+from gravitone.config import Config
 
 
 def member(name, seconds=180.0, artist="Soule", album="Morrowind"):
@@ -305,7 +305,7 @@ def test_a_party_file_carries_everything(tmp_path, config):
 
 def test_a_party_file_saved_into_a_folder_gets_a_name(tmp_path, config):
     written = party.write_file(party.start(roster(), config), tmp_path)
-    assert written.name == "bgst-party.json"
+    assert written.name == "gravitone-party.json"
 
 
 def test_something_that_is_not_a_party_file_says_so(tmp_path):
@@ -313,17 +313,17 @@ def test_something_that_is_not_a_party_file_says_so(tmp_path):
     plain.write_text(json.dumps({"hello": True}))
     with pytest.raises(party.PartyError) as raised:
         party.read_file(plain)
-    assert "not a bgst party file" in str(raised.value)
+    assert "not a gravitone party file" in str(raised.value)
 
 
-def test_a_party_file_from_a_newer_bgst_says_so(tmp_path, config):
+def test_a_party_file_from_a_newer_gravitone_says_so(tmp_path, config):
     raw = party.start(roster(), config).as_dict()
-    raw["bgst_party"] = party.VERSION + 1
+    raw["gravitone_party"] = party.VERSION + 1
     path = tmp_path / "future.json"
     path.write_text(json.dumps(raw))
     with pytest.raises(party.PartyError) as raised:
         party.read_file(path)
-    assert "newer bgst" in str(raised.value)
+    assert "newer gravitone" in str(raised.value)
 
 
 def test_a_party_starts_on_a_whole_second(config):
@@ -336,3 +336,15 @@ def test_an_empty_playlist_cannot_hold_a_party(config):
     with pytest.raises(party.PartyError) as raised:
         party.start(party.Roster.of([], []), config)
     assert "empty" in str(raised.value)
+
+
+def test_a_party_file_from_before_the_rename_still_opens(tmp_path, config):
+    """Somebody may already have one sitting in a shared folder."""
+    raw = party.start(roster(4), config, name="Morrowind evening").as_dict()
+    raw["bgst_party"] = raw.pop("gravitone_party")      # as the old name wrote it
+    path = tmp_path / "old-party.json"
+    path.write_text(json.dumps(raw))
+
+    read = party.read_file(path)
+    assert read.name == "Morrowind evening"
+    assert len(read.roster.music) == 4

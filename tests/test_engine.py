@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from bgsoundtrack import engine, library, player
-from bgsoundtrack.config import Config
+from gravitone import engine, library, player
+from gravitone.config import Config
 
 
 class FakeProcess:
@@ -231,7 +231,7 @@ def test_detect_prefers_requested_backend(monkeypatch):
 
 
 def test_session_reports_what_is_playing(config, fake_player, monkeypatch):
-    from bgsoundtrack import service
+    from gravitone import service
 
     monkeypatch.setattr(service.player, "detect", lambda: player.Backend("ffplay", "/bin/true"))
     monkeypatch.setattr(service.player, "probe_duration", lambda path: 180.0)
@@ -250,7 +250,7 @@ def test_session_reports_what_is_playing(config, fake_player, monkeypatch):
 
 
 def test_session_start_without_a_player_raises(config, monkeypatch):
-    from bgsoundtrack import service
+    from gravitone import service
 
     monkeypatch.setattr(service.player, "detect", _raise_no_player)
     session = service.Session(config)
@@ -267,7 +267,7 @@ def _raise_no_player():
 
 
 def party_roster(names=("a", "b", "c", "d"), seconds=30.0):
-    from bgsoundtrack import party
+    from gravitone import party
 
     return party.Roster.of(
         [
@@ -323,7 +323,7 @@ def run_party(config, made, clock_start, seconds, have=None, controls=None):
 
 def test_two_machines_hear_the_same_thing_at_the_same_time(config, fake_player):
     """One starts at the beginning, one walks in twenty minutes late."""
-    from bgsoundtrack import party
+    from gravitone import party
 
     config.gap_min, config.gap_max, config.ambient_chance = 5, 15, 0.0
     made = party.start(party_roster(), config, seed=4242, epoch=1_700_000_000)
@@ -348,7 +348,7 @@ def test_two_machines_hear_the_same_thing_at_the_same_time(config, fake_player):
 
 def test_a_track_you_do_not_have_holds_its_slot(config, fake_player):
     """Silence for you, music for them, and the next track still on time."""
-    from bgsoundtrack import party
+    from gravitone import party
 
     config.gap_min = config.gap_max = 10
     config.ambient_chance = 0.0
@@ -370,7 +370,7 @@ def test_a_track_you_do_not_have_holds_its_slot(config, fake_player):
 
 def test_skipping_in_a_party_sits_the_track_out(config, fake_player):
     """The sound stops; the slot does not, so you rejoin at the next one."""
-    from bgsoundtrack import party
+    from gravitone import party
 
     config.gap_min = config.gap_max = 10
     config.ambient_chance = 0.0
@@ -385,7 +385,7 @@ def test_skipping_in_a_party_sits_the_track_out(config, fake_player):
 
 
 def test_joining_late_seeks_into_the_track(config, fake_player):
-    from bgsoundtrack import party
+    from gravitone import party
 
     config.gap_min = config.gap_max = 10
     config.ambient_chance = 0.0
@@ -400,7 +400,7 @@ def test_joining_late_seeks_into_the_track(config, fake_player):
 
 def test_a_party_ignores_the_local_shuffle_and_gap_settings(config, fake_player):
     """The party's settings are the party's, or the gaps would not line up."""
-    from bgsoundtrack import party
+    from gravitone import party
 
     config.gap_min = config.gap_max = 10
     config.ambient_chance = 0.0

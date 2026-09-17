@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from bgsoundtrack import library, playlists
-from bgsoundtrack.config import Config
+from gravitone import library, playlists
+from gravitone.config import Config
 
 
 @pytest.fixture

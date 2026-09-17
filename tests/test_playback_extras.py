@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from bgsoundtrack import config as config_module, engine, library, mixer, player, playlists
-from bgsoundtrack.config import MAX_GAP, Config
-from bgsoundtrack.service import Session
+from gravitone import config as config_module, engine, library, mixer, player, playlists
+from gravitone.config import MAX_GAP, Config
+from gravitone.service import Session
 
 
 @pytest.fixture
@@ -206,7 +206,7 @@ def test_the_engine_pushes_volume_at_what_is_playing(config, monkeypatch):
 
 def test_players_are_tagged_for_the_desktop_mixer():
     env = mixer.environment()
-    assert env["PULSE_PROP_application.name"] == "bgst"
+    assert env["PULSE_PROP_application.name"] == "gravitone"
     assert env["PULSE_PROP_media.role"] == "music"
 
 
@@ -278,13 +278,13 @@ def test_ban_without_a_name_still_takes_what_is_playing(session, tmp_path, monke
     assert session.ban()["name"] == "only.mp3"
 
 
-def test_bgst_play_prints_events_without_crashing(tmp_path, monkeypatch, capsys):
-    """`bgst play` walks the event callback for real - a track event has no
+def test_gravitone_play_prints_events_without_crashing(tmp_path, monkeypatch, capsys):
+    """`gravitone play` walks the event callback for real - a track event has no
     duration, and formatting one used to raise."""
-    from bgsoundtrack import cli, engine as engine_module, player as player_module
+    from gravitone import cli, engine as engine_module, player as player_module
 
-    monkeypatch.setenv("BGSOUNDTRACK_ROOT", str(tmp_path / "lib"))
-    monkeypatch.setenv("BGSOUNDTRACK_CONFIG", str(tmp_path / "config.json"))
+    monkeypatch.setenv("GRAVITONE_ROOT", str(tmp_path / "lib"))
+    monkeypatch.setenv("GRAVITONE_CONFIG", str(tmp_path / "config.json"))
     album = tmp_path / "album"
     album.mkdir()
     (album / "song.mp3").write_bytes(b"\0")

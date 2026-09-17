@@ -1,5 +1,5 @@
 #!/bin/sh
-# bgst installer for Linux, macOS, *BSD and WSL.
+# gravitone installer for Linux, macOS, *BSD and WSL.
 #
 #   ./install.sh                 install for the current user
 #   ./install.sh --with-player   also install an audio player (asks first)
@@ -18,10 +18,10 @@
 # package manager, which is always shown before it runs.
 set -eu
 
-APP=bgst
+APP=gravitone
 PREFIX="${PREFIX:-$HOME/.local}"
 BIN="$PREFIX/bin"
-VENV="${BGST_VENV:-$HOME/.local/share/bgst/venv}"
+VENV="${GRAVITONE_VENV:-$HOME/.local/share/gravitone/venv}"
 SRC=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 RED=''; GREEN=''; DIM=''; BOLD=''; OFF=''
@@ -61,12 +61,12 @@ open_in_terminal() {
   [ "$REOPEN" -eq 1 ] || return 1
   [ -t 1 ] && return 1
   [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || return 1
-  [ -n "${BGST_REOPENED:-}" ] && return 1
+  [ -n "${GRAVITONE_REOPENED:-}" ] && return 1
 
   for term in konsole gnome-terminal xfce4-terminal ptyxis kitty alacritty foot xterm x-terminal-emulator; do
     command -v "$term" >/dev/null 2>&1 || continue
-    BGST_REOPENED=1
-    export BGST_REOPENED
+    GRAVITONE_REOPENED=1
+    export GRAVITONE_REOPENED
     inner="'$SRC/$(basename "$0")' $* ; printf '\nPress Enter to close '; read -r _"
     case "$term" in
       gnome-terminal|ptyxis) "$term" -- sh -c "$inner" ;;
@@ -99,12 +99,13 @@ if [ "$UNINSTALL" -eq 1 ]; then
   step "Removing $APP"
   rm -f "$BIN/$APP"
   rm -rf "$VENV"
-  rm -f "$HOME/.local/share/applications/bgst.desktop"
-  rm -f "$HOME/Desktop/bgst.desktop"
+  rm -f "$HOME/.local/share/applications/gravitone.desktop"
+  rm -f "$HOME/.local/share/icons/hicolor/scalable/apps/gravitone.svg"
+  rm -f "$HOME/Desktop/gravitone.desktop"
   DESKTOP_DIR=$( (command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP) || echo "$HOME/Desktop")
-  rm -f "$DESKTOP_DIR/bgst.desktop"
+  rm -f "$DESKTOP_DIR/gravitone.desktop"
   say "Removed. Your library and config were left alone:"
-  say "  ${DIM}~/.local/share/custom soundtrack${OFF}   ${DIM}~/.config/bgsoundtrack${OFF}"
+  say "  ${DIM}~/.local/share/custom soundtrack${OFF}   ${DIM}~/.config/gravitone${OFF}"
   exit 0
 fi
 
@@ -156,7 +157,7 @@ else
     sh -c "$CMD"
   else
     say ""
-    say "No audio player found. bgst needs one of ffmpeg / mpv / vlc."
+    say "No audio player found. gravitone needs one of ffmpeg / mpv / vlc."
     printf 'Run %s%s%s now? [y/N] ' "$BOLD" "$CMD" "$OFF"
     if [ -t 0 ]; then read -r reply; else reply=n; fi
     case "$reply" in [yY]*) sh -c "$CMD" ;; *) say "Skipped - run it yourself later." ;; esac
@@ -182,32 +183,39 @@ fi
 install_shortcuts() {
   APPS="$HOME/.local/share/applications"
   mkdir -p "$APPS"
-  sed "s|Exec=bgst ui|Exec=$BIN/$APP ui|" "$SRC/packaging/bgst.desktop" > "$APPS/bgst.desktop"
-  chmod +x "$APPS/bgst.desktop"
+  # The icon has to be on the icon path before the menu entry points at it,
+  # or the launcher falls back to a generic note.
+  ICONS="$HOME/.local/share/icons/hicolor/scalable/apps"
+  mkdir -p "$ICONS"
+  cp "$SRC/docs/icon.svg" "$ICONS/gravitone.svg" 2>/dev/null || true
+  command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+    gtk-update-icon-cache -q -t -f "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+  sed "s|Exec=gravitone ui|Exec=$BIN/$APP ui|" "$SRC/packaging/gravitone.desktop" > "$APPS/gravitone.desktop"
+  chmod +x "$APPS/gravitone.desktop"
   command -v update-desktop-database >/dev/null 2>&1 && \
     update-desktop-database "$APPS" >/dev/null 2>&1 || true
-  step "Added bgst to your application menu"
+  step "Added gravitone to your application menu"
 
   DESKTOP_DIR=$( (command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP) || echo "$HOME/Desktop")
   if [ -d "$DESKTOP_DIR" ]; then
-    cp "$APPS/bgst.desktop" "$DESKTOP_DIR/bgst.desktop"
-    chmod +x "$DESKTOP_DIR/bgst.desktop"
+    cp "$APPS/gravitone.desktop" "$DESKTOP_DIR/gravitone.desktop"
+    chmod +x "$DESKTOP_DIR/gravitone.desktop"
     # KDE refuses to run a desktop file it does not trust; this is the flag
     # Plasma sets when you click "Trust this executable".
     command -v kwriteconfig5 >/dev/null 2>&1 && \
-      kwriteconfig5 --file "$DESKTOP_DIR/bgst.desktop" --group "Desktop Entry" \
+      kwriteconfig5 --file "$DESKTOP_DIR/gravitone.desktop" --group "Desktop Entry" \
         --key "X-KDE-AuthorizeExecute" "true" 2>/dev/null || true
     step "Put a shortcut on your desktop"
   fi
 }
 
-if [ "$(uname -s)" = "Linux" ] && [ -f "$SRC/packaging/bgst.desktop" ]; then
+if [ "$(uname -s)" = "Linux" ] && [ -f "$SRC/packaging/gravitone.desktop" ]; then
   case "$SHORTCUT" in
     yes) install_shortcuts ;;
     no) ;;
     *)
       say ""
-      printf 'Add bgst to your application menu and desktop? [Y/n] '
+      printf 'Add gravitone to your application menu and desktop? [Y/n] '
       if [ -t 0 ]; then read -r reply; else reply=y; fi
       case "$reply" in [nN]*) say "Skipped." ;; *) install_shortcuts ;; esac
       ;;
@@ -215,7 +223,7 @@ if [ "$(uname -s)" = "Linux" ] && [ -f "$SRC/packaging/bgst.desktop" ]; then
 fi
 
 # -- PATH ------------------------------------------------------------------
-# Without this, `bgst` installs perfectly and then "command not found".
+# Without this, `gravitone` installs perfectly and then "command not found".
 profile_for_shell() {
   case "$(basename "${SHELL:-/bin/sh}")" in
     zsh) echo "${ZDOTDIR:-$HOME}/.zshrc" ;;
@@ -254,7 +262,7 @@ add_to_path() {
   fi
   mkdir -p "$(dirname "$PROFILE")"
   {
-    printf '\n# added by the bgst installer\n'
+    printf '\n# added by the gravitone installer\n'
     printf '%s\n' "$LINE"
   } >> "$PROFILE"
   step "Added $BIN to your PATH in $PROFILE"
@@ -270,7 +278,7 @@ case ":$PATH:" in
   *":$BIN:"*) ON_PATH=1 ;;
   *)
     say ""
-    warn "$BIN is not on your PATH, so typing 'bgst' will not find it yet."
+    warn "$BIN is not on your PATH, so typing 'gravitone' will not find it yet."
     if [ "$PATH_SETUP" = "no" ]; then
       say "Add this to $(profile_for_shell) yourself:"
       say "    $(path_line_for "$(profile_for_shell)")"
@@ -300,7 +308,7 @@ if [ -t 0 ]; then
     *)
       # Detached, or it dies with this terminal when the window closes -
       # which looked exactly like "the control panel never opened".
-      LOG="${XDG_STATE_HOME:-$HOME/.local/state}/bgst"
+      LOG="${XDG_STATE_HOME:-$HOME/.local/state}/gravitone"
       mkdir -p "$LOG"
       if command -v setsid >/dev/null 2>&1; then
         setsid "$BIN/$APP" ui >"$LOG/ui.log" 2>&1 < /dev/null &

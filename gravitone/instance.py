@@ -1,4 +1,4 @@
-"""Knowing whether a bgst UI is already running, and where.
+"""Knowing whether a gravitone UI is already running, and where.
 
 Clicking the shortcut twice, or starting the UI from the installer and then
 from the menu, used to mean a second server fighting for the same port. The
@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from bgsoundtrack.config import config_path
+from gravitone.config import config_path
 
 # When this process started. Anything installed after it is code we are not
 # running - see is_stale().
@@ -93,7 +93,7 @@ def read(config_file: Path | None = None) -> Instance | None:
 
 
 def package_mtime() -> float:
-    """When the installed bgst was last written to.
+    """When the installed gravitone was last written to.
 
     Upgrading while the UI is running leaves a process serving the new page
     from disk with the old Python in memory - which shows up as the browser
@@ -104,7 +104,7 @@ def package_mtime() -> float:
     candidates = list(root.glob("*.py")) + list((root / "ui").glob("*"))
     # pip stamps the dist-info directory at install time, which catches an
     # upgrade even when the files inside kept their original timestamps.
-    for sibling in root.parent.glob("bgsoundtrack*.dist-info"):
+    for sibling in root.parent.glob("gravitone*.dist-info"):
         candidates.append(sibling)
         candidates.append(sibling / "RECORD")
     for path in candidates:
@@ -125,7 +125,7 @@ def forget_staleness() -> None:
 
 
 def process_is_stale(ttl: float = 10.0) -> bool:
-    """True if bgst was updated on disk after this process started.
+    """True if gravitone was updated on disk after this process started.
 
     Cached: this is asked once a second and answers by stat()ing the package.
     """

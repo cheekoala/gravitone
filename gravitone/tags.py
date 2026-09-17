@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from bgsoundtrack.config import config_path
+from gravitone.config import config_path
 
 CACHE_VERSION = 2
 PROBE_WORKERS = 8

@@ -24,7 +24,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from bgsoundtrack.config import AUDIO_EXTENSIONS, config_path
+from gravitone.config import AUDIO_EXTENSIONS, config_path
 
 MAX_BYTES = 6 * 1024 * 1024
 # How many tracks of a record to try before deciding it has no cover. Plenty
@@ -376,7 +376,7 @@ class Art:
                 with self._lock:
                     self._working.discard(key)
 
-        threading.Thread(target=work, daemon=True, name="bgst-art").start()
+        threading.Thread(target=work, daemon=True, name="gravitone-art").start()
 
     def has_any(self) -> bool:
         return bool(shutil.which("ffmpeg"))

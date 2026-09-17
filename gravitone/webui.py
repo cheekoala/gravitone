@@ -29,7 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from bgsoundtrack import (
+from gravitone import (
     __version__,
     config as config_module,
     instance as instance_state,
@@ -39,7 +39,7 @@ from bgsoundtrack import (
     playlists,
     transfer,
 )
-from bgsoundtrack.service import Session
+from gravitone.service import Session
 
 UI_DIR = Path(__file__).parent / "ui"
 
@@ -47,11 +47,28 @@ UI_DIR = Path(__file__).parent / "ui"
 MUSIC_HINTS = ("Music", "Musique", "Musik", "Muziek", "音楽", "Downloads", "Desktop")
 
 
-def _audio_count(directory: Path) -> int:
+def _contents(directory: Path) -> tuple:
+    """(audio files, subfolders) directly inside. One listing, not a walk:
+    this is asked for every row on screen."""
+    audio = folders = 0
     try:
-        return sum(1 for entry in directory.iterdir() if library.is_audio(entry))
+        for entry in directory.iterdir():
+            if entry.name.startswith("."):
+                continue
+            try:
+                if entry.is_dir():
+                    folders += 1
+                elif library.is_audio(entry):
+                    audio += 1
+            except OSError:
+                continue
     except OSError:
-        return 0
+        return (0, 0)
+    return (audio, folders)
+
+
+def _audio_count(directory: Path) -> int:
+    return _contents(directory)[0]
 
 
 def browse(path: str | None) -> dict:
@@ -74,21 +91,39 @@ def browse(path: str | None) -> dict:
             continue
         try:
             if entry.is_dir():
-                directories.append({"name": entry.name, "path": str(entry),
-                                    "audio": _audio_count(entry)})
+                audio, folders = _contents(entry)
+                directories.append({
+                    "name": entry.name,
+                    "path": str(entry),
+                    "audio": audio,
+                    "folders": folders,
+                })
             elif library.is_audio(entry):
                 files.append({"name": entry.name, "path": str(entry)})
         except OSError:
             continue
 
-    shortcuts = [{"name": "Home", "path": str(home)}]
+    # Home has a button of its own in the browser bar, so the chips are for
+    # the places worth a shortcut rather than the obvious one.
+    shortcuts = []
     for hint in MUSIC_HINTS:
         candidate = home / hint
         if candidate.is_dir():
             shortcuts.append({"name": hint, "path": str(candidate)})
+    # The path in pieces, so the page can offer every step of it as a way
+    # back rather than only the one directly above.
+    crumbs, walk = [], target
+    while True:
+        crumbs.append({"name": walk.name or str(walk), "path": str(walk)})
+        if walk.parent == walk:
+            break
+        walk = walk.parent
+    crumbs.reverse()
+
     return {
         "path": str(target),
         "parent": None if target.parent == target else str(target.parent),
+        "crumbs": crumbs,
         "dirs": directories,
         "files": files,
         "shortcuts": shortcuts,
@@ -96,7 +131,7 @@ def browse(path: str | None) -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = f"bgst/{__version__}"
+    server_version = f"gravitone/{__version__}"
     session: Session
     token: str
 
@@ -136,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(status, json.dumps(payload).encode("utf-8"), "application/json")
 
     def _authorized(self, url=None) -> bool:
-        supplied = self.headers.get("X-BGST-Token", "")
+        supplied = self.headers.get("X-Gravitone-Token", "")
         if not supplied and url is not None and url.path == "/api/cover":
             # An <img> cannot send a header, so the cover route - and only
             # that route - accepts the token in the query string.
@@ -210,8 +245,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(
                 {
                     "error": f"{type(exc).__name__}: {exc}",
-                    "hint": "if bgst was updated while running, restart it: "
-                    "bgst ui --stop, then bgst ui",
+                    "hint": "if gravitone was updated while running, restart it: "
+                    "gravitone ui --stop, then gravitone ui",
                 },
                 HTTPStatus.INTERNAL_SERVER_ERROR,
             )
@@ -370,7 +405,7 @@ class Handler(BaseHTTPRequestHandler):
             # Blocks until the person at the machine answers the dialog.
             picked = session.pick(
                 body.get("kind", "folder"),
-                body.get("title", "Choose a folder for bgst"),
+                body.get("title", "Choose a folder for gravitone"),
                 body.get("suggested", ""),
             )
             return {
@@ -394,9 +429,9 @@ def _restart() -> None:
     environment = dict(_os.environ)
     token = getattr(_restart, "token", None)
     if token:
-        environment["BGST_TOKEN"] = token
+        environment["GRAVITONE_TOKEN"] = token
     try:
-        _os.execve(sys.executable, [sys.executable, "-m", "bgsoundtrack", *sys.argv[1:]], environment)
+        _os.execve(sys.executable, [sys.executable, "-m", "gravitone", *sys.argv[1:]], environment)
     except OSError:
         _os.kill(_os.getpid(), signal.SIGTERM)
 
@@ -441,7 +476,7 @@ def _bind(host: str, port: int, handler, fallback: bool) -> ThreadingHTTPServer:
             last = exc
     if not fallback:
         raise PortInUse(
-            f"port {port} is already in use - something else (an older bgst?) "
+            f"port {port} is already in use - something else (an older gravitone?) "
             f"is listening there"
         ) from last
     # Everything in the range is taken: let the OS pick anything free.
@@ -461,7 +496,7 @@ def serve(
     fallback: bool = True,
 ) -> ThreadingHTTPServer:
     """Start the UI server. Returns it running on a background thread."""
-    token = token or os.environ.get("BGST_TOKEN") or secrets.token_urlsafe(16)
+    token = token or os.environ.get("GRAVITONE_TOKEN") or secrets.token_urlsafe(16)
     handler = type("BoundHandler", (Handler,), {"session": session, "token": token})
     httpd = _bind(host, port, handler, fallback)
     httpd.verbose = verbose
@@ -471,7 +506,7 @@ def serve(
     shown_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
     url = f"http://{shown_host}:{httpd.server_port}/#{token}"
     httpd.url = url
-    threading.Thread(target=httpd.serve_forever, daemon=True, name="bgst-ui").start()
+    threading.Thread(target=httpd.serve_forever, daemon=True, name="gravitone-ui").start()
     httpd.opened = webbrowser.open(url) if open_browser else False
     return httpd
 
@@ -485,7 +520,7 @@ def run(
     new: bool = False,
     new_token: bool = False,
 ) -> int:
-    """Blocking entry point used by `bgst ui`."""
+    """Blocking entry point used by `gravitone ui`."""
     wanted = DEFAULT_PORT if port is None else port
 
     # Already running? Open that one instead of fighting it for the port.
@@ -497,7 +532,7 @@ def run(
                 # It is serving the new page off disk with the old code in
                 # memory, which surfaces as "unknown setting" in the browser.
                 print(
-                    "the bgst that is running started before the current version "
+                    "the gravitone that is running started before the current version "
                     "was installed",
                     flush=True,
                 )
@@ -510,19 +545,19 @@ def run(
                         existing = None
                 else:
                     notify.complain(
-                        "bgst was updated",
-                        "The bgst that is running is from the previous version. "
-                        "Restart it with:\n\n    bgst ui --stop\n    bgst ui",
+                        "gravitone was updated",
+                        "The gravitone that is running is from the previous version. "
+                        "Restart it with:\n\n    gravitone ui --stop\n    gravitone ui",
                     )
 
         if not new and existing is not None:
-            print(f"bgst ui is already running  {existing.url}", flush=True)
+            print(f"gravitone ui is already running  {existing.url}", flush=True)
             if open_browser and not webbrowser.open(existing.url):
                 notify.complain(
-                    "bgst is already running",
-                    f"bgst is already running. Go to:\n\n{existing.url}",
+                    "gravitone is already running",
+                    f"gravitone is already running. Go to:\n\n{existing.url}",
                 )
-            print("use 'bgst ui --new' for a second one, or 'bgst ui --stop' to stop it")
+            print("use 'gravitone ui --new' for a second one, or 'gravitone ui --stop' to stop it")
             return 0
 
     config = config_module.load(config_path)
@@ -543,13 +578,13 @@ def run(
         )
     except PortInUse as exc:
         notify.complain(
-            "bgst could not start",
-            f"{exc}.\n\nTry 'bgst ui' without --port, or 'bgst ui --stop' to stop "
+            "gravitone could not start",
+            f"{exc}.\n\nTry 'gravitone ui' without --port, or 'gravitone ui --stop' to stop "
             f"the one that is running.",
         )
         return 1
     except OSError as exc:
-        notify.complain("bgst could not start", f"could not start the UI: {exc}")
+        notify.complain("gravitone could not start", f"could not start the UI: {exc}")
         return 1
 
     _restart.token = httpd.token      # so a restart keeps open pages alive
@@ -567,13 +602,13 @@ def run(
 
     if httpd.server_port != wanted:
         print(f"port {wanted} was busy, using {httpd.server_port} instead", flush=True)
-    print(f"bgst ui  {httpd.url}", flush=True)
+    print(f"gravitone ui  {httpd.url}", flush=True)
     if open_browser and not httpd.opened:
         # Launched from a shortcut with no browser handler, this is the
         # difference between a link and a click that seems to do nothing.
         notify.complain(
-            "bgst is running",
-            f"bgst is running, but no browser opened. Go to:\n\n{httpd.url}",
+            "gravitone is running",
+            f"gravitone is running, but no browser opened. Go to:\n\n{httpd.url}",
         )
     if host in ("0.0.0.0", "::", ""):
         lan = _lan_address()
@@ -603,10 +638,10 @@ def run(
 
 
 def status(config_path: Path | None = None) -> int:
-    """`bgst ui --status`: what is running, where, and since when."""
+    """`gravitone ui --status`: what is running, where, and since when."""
     existing = instance_state.running(config_path)
     if existing is None:
-        print("no bgst ui is running")
+        print("no gravitone ui is running")
         return 1
     age = max(0, int(time.time() - existing.started)) if existing.started else 0
     shape = f"{age // 3600}h {(age % 3600) // 60}m" if age >= 3600 else f"{age // 60}m {age % 60}s"
@@ -618,14 +653,14 @@ def status(config_path: Path | None = None) -> int:
 
 
 def stop(config_path: Path | None = None) -> int:
-    """`bgst ui --stop`: end the running UI, if there is one."""
+    """`gravitone ui --stop`: end the running UI, if there is one."""
     existing = instance_state.running(config_path)
     if existing is None:
-        print("no bgst ui is running")
+        print("no gravitone ui is running")
         return 0
     if instance_state.stop(existing):
         instance_state.clear(config_path)
-        print(f"stopped bgst ui on port {existing.port}")
+        print(f"stopped gravitone ui on port {existing.port}")
         return 0
-    print(f"could not stop the bgst ui on port {existing.port}", file=sys.stderr)
+    print(f"could not stop the gravitone ui on port {existing.port}", file=sys.stderr)
     return 1

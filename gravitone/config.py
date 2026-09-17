@@ -41,7 +41,7 @@ AUDIO_EXTENSIONS = frozenset(
 
 def default_root() -> Path:
     """Where the 'custom soundtrack' folder lives by default."""
-    env = os.environ.get("BGSOUNDTRACK_ROOT")
+    env = os.environ.get("GRAVITONE_ROOT")
     if env:
         return Path(env).expanduser()
     data_home = os.environ.get("XDG_DATA_HOME")
@@ -49,13 +49,43 @@ def default_root() -> Path:
     return base / "custom soundtrack"
 
 
-def config_path() -> Path:
-    env = os.environ.get("BGSOUNDTRACK_CONFIG")
-    if env:
-        return Path(env).expanduser()
+# What this was called before it had a name. Everything it holds - the
+# playlists, the tags, the covers that took an evening to find - is still
+# wanted, so the folder is moved across rather than abandoned.
+FORMER_NAME = "bgsoundtrack"
+
+
+def config_dir() -> Path:
     config_home = os.environ.get("XDG_CONFIG_HOME")
     base = Path(config_home).expanduser() if config_home else Path.home() / ".config"
-    return base / "bgsoundtrack" / "config.json"
+    return base / "gravitone"
+
+
+def adopt_old_config(base: Path | None = None) -> Path | None:
+    """Take over the folder the old name used, if this one has none yet.
+
+    A rename that loses somebody's library is not a rename, it is a wipe.
+    This is one `rename` on the same filesystem: instant, and it copies
+    nothing. Returns where it came from, or None if there was nothing to do.
+    """
+    new = base or config_dir()
+    old = new.parent / FORMER_NAME
+    if new.exists() or not old.is_dir():
+        return None
+    try:
+        new.parent.mkdir(parents=True, exist_ok=True)
+        old.rename(new)
+    except OSError:
+        return None            # left where it is; nothing is lost
+    return old
+
+
+def config_path() -> Path:
+    env = os.environ.get("GRAVITONE_CONFIG")
+    if env:
+        return Path(env).expanduser()
+    adopt_old_config()
+    return config_dir() / "config.json"
 
 
 @dataclass

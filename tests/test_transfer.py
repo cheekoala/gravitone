@@ -6,8 +6,8 @@ import zipfile
 
 import pytest
 
-from bgsoundtrack import library, playlists, transfer
-from bgsoundtrack.config import Config
+from gravitone import library, playlists, transfer
+from gravitone.config import Config
 
 
 def album(directory, *names):
@@ -41,7 +41,7 @@ def test_manifest_describes_folders_links_and_removals(setup):
     library.remove_track(config, "two.mp3", playlist=playlist)
     data = transfer.manifest(config, store, ["Hollow Kingdom"])
 
-    assert data["bgst"] == transfer.FORMAT
+    assert data["gravitone"] == transfer.FORMAT
     item = data["playlists"][0]
     assert item["name"] == "Hollow Kingdom"
     assert item["folders"]["music"] == [str(tmp_path / "music" / "kingdom")]
@@ -163,7 +163,7 @@ def test_a_bundle_with_a_traversing_path_is_refused(setup, tmp_path):
         bundle.writestr("audio/../../escape.mp3", b"\0")
         bundle.writestr(
             transfer.MANIFEST_NAME,
-            json.dumps({"bgst": 1, "playlists": [{"id": "x", "name": "X"}]}),
+            json.dumps({"gravitone": 1, "playlists": [{"id": "x", "name": "X"}]}),
         )
     result = transfer.import_bundle(config, store, nasty, into=tmp_path / "unpack")
     assert result.tracks == 0
@@ -174,12 +174,12 @@ def test_a_bundle_with_a_traversing_path_is_refused(setup, tmp_path):
 def test_reading_a_file_that_is_not_an_export(tmp_path):
     plain = tmp_path / "notes.json"
     plain.write_text('{"hello": "world"}')
-    with pytest.raises(transfer.TransferError, match="not a bgst export"):
+    with pytest.raises(transfer.TransferError, match="not a gravitone export"):
         transfer.read_manifest(plain)
 
 
-def test_an_export_from_a_newer_bgst_is_refused(tmp_path):
+def test_an_export_from_a_newer_gravitone_is_refused(tmp_path):
     ahead = tmp_path / "future.json"
-    ahead.write_text(json.dumps({"bgst": transfer.FORMAT + 5, "playlists": []}))
-    with pytest.raises(transfer.TransferError, match="newer bgst"):
+    ahead.write_text(json.dumps({"gravitone": transfer.FORMAT + 5, "playlists": []}))
+    with pytest.raises(transfer.TransferError, match="newer gravitone"):
         transfer.read_manifest(ahead)

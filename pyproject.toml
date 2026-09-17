@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bgsoundtrack"
+name = "gravitone"
 version = "0.1.0"
-description = "Play a custom game soundtrack with random silence or ambience between songs"
+description = "Your own soundtrack for any game: your music, with silence or weather between the songs"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
@@ -16,13 +16,15 @@ classifiers = [
 ]
 
 [project.scripts]
-bgst = "bgsoundtrack.cli:main"
+gravitone = "gravitone.cli:main"
+# Nine letters is a lot to type a hundred times a day.
+grav = "gravitone.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/cheekoala/custom_bg_game_soundtrack_player"
 
 [tool.setuptools]
-packages = ["bgsoundtrack"]
+packages = ["gravitone"]
 
 [tool.setuptools.package-data]
-bgsoundtrack = ["ui/*"]
+gravitone = ["ui/*"]
