@@ -710,3 +710,18 @@ td.col-cover { padding-right: 0; }
 .played-act:hover { color: #ffa8ab; border-color: rgba(229,72,77,.4); background: rgba(229,72,77,.1); }
 .history li.gone .played-act:hover { color: #7ff0d0; border-color: var(--accent-dim); background: rgba(20,184,143,.1); }
 @media (hover: none) { .played-act { opacity: 1; } }
+
+/* -- bundling ------------------------------------------------------- */
+.bundle { margin-top: 14px; border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.bundle .field { margin-bottom: 6px; }
+.bundle select {
+  appearance: none; -webkit-appearance: none;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px 10px; font: inherit; font-size: 13px; cursor: pointer;
+  max-width: 100%;
+}
+.bundle select:disabled { opacity: .5; cursor: not-allowed; }
+.packing { margin-top: 10px; }
+.packing .progress { margin-bottom: 6px; }
+#bundle-size strong { color: var(--text); font-weight: 600; }

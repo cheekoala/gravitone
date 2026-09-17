@@ -384,6 +384,41 @@ hear what you hear. Importing one unpacks to
 (Paths inside a bundle are checked before extraction — a zip cannot write
 outside that folder.)
 
+### Converting on the way in
+
+Four hundred FLACs is about fifteen gigabytes, which is not a thing anybody
+sends anybody. A bundle can convert as it packs:
+
+```sh
+gravitone export ~/share.zip --bundle --audio mp3 --dry-run   # how big would it be?
+gravitone export ~/share.zip --bundle --audio mp3             # about a fifth
+gravitone export ~/share.zip --bundle --audio opus            # about a tenth
+```
+
+| `--audio` | roughly | cover art |
+| --- | --- | --- |
+| `original` | whatever it is now | kept |
+| `mp3` | ~245 kbps | kept |
+| `mp3-small` | ~115 kbps | kept |
+| `opus` | ~96 kbps | dropped — Ogg Opus has nowhere to put it |
+
+Tags come across, and so does the embedded cover (except for Opus). **Your
+library is never opened for writing**: a conversion reads a file and writes a
+new one into a temporary folder on its way into the zip.
+
+It says what it will weigh before it starts. The guess is length × bitrate,
+which on real music lands within a couple of percent — a 16-track, 310 MB
+FLAC playlist was guessed at 61 MB of MP3 and came out 60.
+
+Tracks convert several at a time, one process per core: those 16 took 29
+seconds on one lane and 7.5 on four. Four hundred is a few minutes rather
+than most of an hour.
+
+In the control panel it is Config → *Export & import*: pick the format, read
+the estimate, and it packs in the background with a progress bar and a
+**Stop** button. Stopping deletes the half-written zip rather than leaving
+something that looks finished.
+
 Either can be driven from Config → *Export & import*, which uses your
 desktop's save/open dialog where there is one and a path box where there
 isn't. Import always **adds**: a name that already exists becomes

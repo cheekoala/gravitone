@@ -24,6 +24,15 @@ from gravitone import (
 from gravitone.config import Config
 
 
+def _size(count: int) -> str:
+    """Bytes, in the unit a person would have used."""
+    if count >= 1e9:
+        return f"{count / 1e9:.1f} GB"
+    if count >= 1e6:
+        return f"{count / 1e6:.0f} MB"
+    return f"{count / 1e3:.0f} KB"
+
+
 def _fmt(seconds: float) -> str:
     minutes, secs = divmod(int(round(seconds)), 60)
     return f"{minutes}:{secs:02d}" if minutes else f"{secs}s"
@@ -210,11 +219,41 @@ def cmd_export(args) -> int:
     path = Path(args.path).expanduser()
 
     if args.bundle:
+        from gravitone import library as library_module, tags as tag_reader, transcode
+
+        # The guess is length times bitrate, so it needs lengths. Reading
+        # them costs one ffprobe per track, once, and is the difference
+        # between a real number and three minutes a track.
+        reader = tag_reader.Reader(tag_reader.cache_path(_config_path(args)))
+        targets = [
+            entry.target
+            for playlist_item in (
+                [store.get(name) for name in names] if names else store.playlists
+            )
+            for section in library_module.SECTIONS
+            for entry in library_module.entries(config, section, playlist_item)
+        ]
+        waiting = reader.pending(targets)
+        if waiting:
+            print(f"reading the length of {len(waiting)} track(s)...", flush=True)
+            reader.read_all(waiting)
+            reader.save()
+        plan = transfer.bundle_plan(config, store, names, audio=args.audio, reader=reader)
+        if args.audio and args.audio != transcode.DEFAULT:
+            print(
+                f"{plan['tracks']} track(s), {_size(plan['original'])} as they are "
+                f"- about {_size(plan['bytes'])} as {plan['label']}"
+            )
+        if args.dry_run:
+            return 0
+
+        def say(done, total, name):
+            print(f"  {done}/{total}  {name}", flush=True)
+
         report = transfer.export_bundle(
             config, store, path, names,
-            on_progress=(lambda done, name: print(f"  packed {done}: {name}"))
-            if args.verbose
-            else None,
+            on_progress=say if args.verbose else None,
+            audio=args.audio,
         )
         size = report.path.stat().st_size / 1e6
         print(f"wrote {report.path} ({size:.1f} MB, {report.tracks} tracks)")
@@ -805,6 +844,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--bundle",
         action="store_true",
         help="a zip with the audio files inside, to share",
+    )
+    p.add_argument(
+        "--audio",
+        choices=["original", "mp3", "mp3-small", "opus"],
+        default="original",
+        help=(
+            "convert the audio on the way into a bundle. FLAC is lovely and "
+            "enormous; mp3 is about a fifth of the size (default: original)"
+        ),
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="say how big the bundle would be, and write nothing",
     )
     p.add_argument("--format", choices=["json", "csv"], default="json")
     p.add_argument("--verbose", action="store_true", help="name each packed file")

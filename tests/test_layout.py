@@ -710,3 +710,71 @@ def test_a_played_track_can_be_taken_out_and_put_back(served_playing):
             )
         finally:
             browser.close()
+
+
+def test_a_bundle_says_what_it_will_weigh_before_it_starts(served, tmp_path):
+    """Nobody should find out a bundle is fifteen gigabytes by waiting."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=settings]")
+            page.wait_for_function(
+                "() => document.getElementById('bundle-size').textContent !== '—'",
+                timeout=15000,
+            )
+            kept = page.inner_text("#bundle-size")
+            assert "copied as they are" in kept
+
+            page.select_option("#bundle-audio", "mp3")
+            page.wait_for_function(
+                "() => document.getElementById('bundle-size')"
+                ".textContent.includes('converted')",
+                timeout=15000,
+            )
+            converted = page.inner_text("#bundle-size")
+            assert "as they are" in converted and "converted" in converted
+
+            # Every setting is offered, and the ones this machine cannot do
+            # are shown as such rather than hidden.
+            options = page.evaluate(
+                """() => [...document.querySelectorAll('#bundle-audio option')]
+                        .map((o) => ({ value: o.value, off: o.disabled }))"""
+            )
+            assert [o["value"] for o in options][:2] == ["original", "mp3"]
+            assert options[0]["off"] is False
+        finally:
+            browser.close()
+
+
+def test_packing_shows_progress_and_can_be_stopped(served, tmp_path):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=settings]")
+            page.wait_for_selector("#export-bundle", timeout=15000)
+            assert page.is_hidden("#packing")
+            assert page.is_hidden("#bundle-stop")
+
+            # No desktop dialog here, so it falls back to the path box.
+            page.click("#export-bundle")
+            page.wait_for_selector("#transfer-form:not([hidden])", timeout=15000)
+            page.fill("#transfer-path", str(tmp_path / "share.zip"))
+            page.press("#transfer-path", "Enter")
+
+            page.wait_for_function(
+                """() => document.getElementById('packing-note')
+                        .textContent.startsWith('Wrote')""",
+                timeout=30000,
+            )
+            assert page.evaluate(
+                "document.getElementById('packing-bar').style.width") == "100%"
+            assert (tmp_path / "share.zip").exists()
+            # Back to ready: the buttons are usable again.
+            assert page.is_hidden("#bundle-stop")
+            assert not page.is_disabled("#export-bundle")
+        finally:
+            browser.close()
