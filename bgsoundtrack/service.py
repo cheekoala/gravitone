@@ -646,8 +646,22 @@ class Session:
                 self._tags_version += 1      # the table has new thumbnails
 
         self._art_pending = len(wanted)
-        threading.Thread(target=work, daemon=True, name="bgst-art-scan").start()
+        # Kept so a caller can wait for the scan rather than watch the
+        # counter: the counter reaches zero a moment before the answers are
+        # written down.
+        self._art_thread = threading.Thread(
+            target=work, daemon=True, name="bgst-art-scan"
+        )
+        self._art_thread.start()
         return len(wanted)
+
+    def wait_for_covers(self, timeout: float = 30.0) -> bool:
+        """Block until the art scan has finished. True if it is done."""
+        thread = getattr(self, "_art_thread", None)
+        if thread is None:
+            return True
+        thread.join(timeout=timeout)
+        return not thread.is_alive()
 
     # -- parties ---------------------------------------------------------
 

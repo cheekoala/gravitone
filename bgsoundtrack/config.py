@@ -89,6 +89,10 @@ class Config:
     # better named than they are tagged.
     show_filenames: bool = True
 
+    # How long sound takes to arrive and to leave, in seconds. 0 cuts
+    # straight in and out, which is what a skip used to sound like.
+    fade: float = 1.5
+
     # Nudge for a party, in seconds: added to this machine's clock when it
     # works out where the party has got to. Both ends normally run NTP and
     # need nothing, but a clock that is known to be a second out can say so.
@@ -140,6 +144,8 @@ class Config:
             value = getattr(self, name)
             if not 0 <= value <= 100:
                 raise ValueError(f"{name} must be between 0 and 100")
+        if not 0.0 <= self.fade <= 10.0:
+            raise ValueError("fade must be between 0 and 10 seconds")
         if abs(self.party_offset) > 3600:
             raise ValueError("party_offset must be within an hour")
         for name in ("music_sources", "ambient_sources"):

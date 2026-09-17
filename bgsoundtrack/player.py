@@ -2,6 +2,12 @@
 
 No Python audio dependencies: we shell out to ffplay / mpv / afplay / cvlc,
 one process per track, which also gives us a free 'stop' (kill the process).
+
+Sound does not appear and vanish; it arrives and leaves. Where the player
+takes a filter (ffplay) the fade is part of the decode, which is exact and
+costs nothing. Where the sound has to stop at a moment nobody planned - you
+pressed skip - there is no filter to schedule, so the fade is walked down
+through the system mixer instead and the process is ended quiet.
 """
 
 from __future__ import annotations
@@ -30,6 +36,8 @@ class Backend:
         volume: int,
         duration: float | None,
         start: float | None = None,
+        fade: float = 0.0,
+        length: float | None = None,
     ) -> list[str]:
         if self.name == "ffplay":
             cmd = [
@@ -46,6 +54,9 @@ class Backend:
                 cmd += ["-ss", f"{start:.3f}"]
             if duration is not None:
                 cmd += ["-t", f"{duration:.3f}"]
+            filters = self.fades(fade, duration, start, length)
+            if filters:
+                cmd += ["-af", filters]
             return cmd + [str(path)]
         if self.name == "mpv":
             cmd = [
@@ -82,6 +93,42 @@ class Backend:
                 cmd += ["--run-time", f"{duration:.0f}"]
             return cmd + [str(path)]
         raise PlaybackError(f"unsupported backend {self.name!r}")
+
+    @staticmethod
+    def fades(
+        fade: float,
+        duration: float | None,
+        start: float | None,
+        length: float | None,
+    ) -> str:
+        """An ffmpeg filter that eases this stretch of audio in and out.
+
+        The fade out needs to know when the end is. That is the `-t` we
+        asked for, or what is left of a track we have a length for; without
+        either, the sound still arrives gently and simply stops when the file
+        does.
+        """
+        if fade <= 0:
+            return ""
+        played = duration
+        if played is None and length:
+            played = length - (start or 0.0)
+        span = fade
+        if played is not None:
+            if played <= 0.5:
+                return ""
+            # Never let the two fades meet in the middle: a short bed would
+            # otherwise be all fade and no sound.
+            span = min(fade, played / 3)
+        parts = [f"afade=t=in:st=0:d={span:.3f}"]
+        if played is not None:
+            parts.append(f"afade=t=out:st={played - span:.3f}:d={span:.3f}")
+        return ",".join(parts)
+
+    @property
+    def fades_itself(self) -> bool:
+        """Whether the player can fade from a filter, rather than the mixer."""
+        return self.name == "ffplay"
 
     @property
     def supports_duration(self) -> bool:
@@ -145,6 +192,28 @@ class Playback:
         except subprocess.TimeoutExpired:
             return None
 
+    def fade_out(
+        self, seconds: float, volume: int = 100, steps: int = 8, sleep=time.sleep
+    ) -> bool:
+        """Walk the sound down, then stop it.
+
+        For an ending nobody scheduled - skip, or stop - there is no filter to
+        arrange it in advance, so the system mixer is stepped down instead.
+        False means there was no mixer to do it with and the sound stopped
+        where it was.
+        """
+        if seconds <= 0 or self.process.poll() is not None:
+            self.stop()
+            return False
+        faded = False
+        for index in range(steps - 1, -1, -1):
+            if not self.set_volume(round(volume * index / steps)):
+                break           # no mixer here: nothing to fade with
+            faded = True
+            sleep(seconds / steps)
+        self.stop()
+        return faded
+
     def stop(self) -> None:
         if self.process.poll() is not None:
             return
@@ -166,8 +235,10 @@ def play(
     volume: int = 70,
     duration: float | None = None,
     start: float | None = None,
+    fade: float = 0.0,
+    length: float | None = None,
 ) -> Playback:
-    command = backend.command(path, volume, duration, start)
+    command = backend.command(path, volume, duration, start, fade, length)
     try:
         process = subprocess.Popen(
             command,

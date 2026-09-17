@@ -25,7 +25,7 @@ silence or a bed of ambience (wind, rain, tavern noise, crickets).
 - **No Python dependencies.** Playback goes through `ffplay`, `mpv`, `afplay`
   or `vlc`, whichever you have.
 
-![The bgst control panel, with Ban armed and its confirm dropped below](docs/ui-now.png)
+![The bgst control panel, with Remove armed and its confirm dropped below](docs/ui-now.png)
 
 ## Install
 
@@ -174,7 +174,11 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 | ![The track table, sorted by album, with one row playing](docs/ui-library.png) | ![Settings: folders, export and import](docs/ui-settings.png) |
 | ![Adding: a whole folder, or just the files in it](docs/ui-add.png) | |
 
-- **Top bar** — the playlist selector; switching it switches what plays.
+- **Top bar** — the playlist selector; switching it switches what plays. The
+  button says what pressing it does — **Play**, then **Stop** — and a green
+  **Live** badge next to it says something is sounding. The button is never
+  the status: you should not have to press the word "Live" to make things
+  stop.
 - **Now** — what is playing, named from its tags (`Anchor — Vela`, with the
   album underneath and the cover beside it) or how long the current gap runs,
   with history. Tags for the playing track are read on the spot, so this
@@ -187,11 +191,16 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
   offers **Add folder** (the whole folder joins this playlist, live) and
   **Link files** (just the files in it now, as symlinks), plus *New playlist
   from this folder…*.
-- **Config** — gaps, levels, shuffle, loop, your playlists (rename, delete,
-  create), this playlist's folders and removed tracks, and export/import. Changes save
-  immediately and take effect from the next gap; no need to restart playback.
+- **Config** — gaps, levels, fade, shuffle, loop, your playlists (rename,
+  delete, create), this playlist's folders and removed tracks, and
+  export/import. Changes save immediately and take effect from the next gap;
+  no need to restart playback.
 
-Keys: `space` play/stop, `n` next, `b` ban. Every API call needs the token in the URL,
+On a wide screen the artwork is given room: the cover in Now is 288px and the
+table's thumbnails are 68px, dropping back to 148/34 on a tablet and 96/34 on
+a phone. It is a music player; the records should be visible.
+
+Keys: `space` play/stop, `n` next, `r` remove (`b` still works). Every API call needs the token in the URL,
 so another page in your browser cannot drive your player or read your disk.
 
 Run it as a phone remote for the machine that's playing:
@@ -368,6 +377,8 @@ bgst party leave
 or Party in the control panel: **Start a party** gives you a code to read
 out; **Join a party** takes one.
 
+![A party running: the code, what is on, and what is coming](docs/ui-party.png)
+
 ### How it can possibly work
 
 A session is not a stream, it is a **timetable**, and the timetable is a pure
@@ -398,8 +409,8 @@ carries the seed, the epoch, a fingerprint of the roster, and **the settings
 that shape the gaps** — `gap_min`, `gap_max`, `ambient_chance`,
 `ambient_min_tail`, `ambient_random_start`, `shuffle` and `loop`. Those have
 to travel: the silences are part of the party, not a local preference.
-Volume, hidden mode and which player you use stay yours — they change nothing
-about when the next track starts.
+Volume, fade, hidden mode and which player you use stay yours — they change
+nothing about when the next track starts.
 
 What the code cannot carry is 300 tracks, so the **party file** does. Put it
 next to the music you are already sharing; whoever takes it keeps the roster
@@ -434,7 +445,7 @@ step, so there is no warning to click through — but a button whose whole
 effect is *silence* looks broken, so the page says what it did and **keeps
 saying it** until the party moves on by itself: a note that stays put rather
 than fading after three seconds, and "Sitting this one out" where the player
-would normally name what is on. Click the note to wave it away. Ban is off for a track that
+would normally name what is on. Click the note to wave it away. Remove is off for a track that
 is not on your machine, and a track you have banned simply plays as silence
 for you — the same rule as one you never had.
 
@@ -517,12 +528,12 @@ On Windows, symlinks need Developer Mode (Settings → System → For developers
 Without it `bgst` falls back to hard links, which also cost no extra space but
 cannot cross drives.
 
-## Ban
+## Remove
 
-**Ban** sits beside skip and never moves. Press it (or `b`) and a confirm
+**Remove** sits beside skip and never moves. Press it (or `r`) and a confirm
 button drops down *on its own layer* naming the track — the buttons
 underneath stay exactly where they were, so the thing under your cursor is
-still the thing you were aiming at. Press the confirm (or `b` again) to go
+still the thing you were aiming at. Press the confirm (or `r` again) to go
 through with it; click anywhere else, press `Escape`, or wait eight seconds
 and it forgets.
 
@@ -533,8 +544,8 @@ playlist*.
 
 The confirmation names the track it armed on, and the server checks that name
 before acting: if the music moved on while the confirm was sitting there,
-nothing is banned. Ban during ambience bans the ambient track instead; during
-silence there is nothing to ban.
+nothing is removed. Remove during ambience takes out the ambient track
+instead; during silence there is nothing to remove.
 
 ## Gaps between songs
 
@@ -599,6 +610,31 @@ them per command — handy for a separate library per game.
 | Runtime | Python 3.9+, standard library only |
 | File chooser | your desktop's own, when Tk is installed; a built-in browser otherwise |
 | UI | any browser, including a phone on the same network |
+
+## Fades
+
+Sound arrives and leaves rather than appearing and vanishing. **Config →
+Fade** sets how long that takes (1.5s by default, 0 turns it off), and it
+applies to tracks and to ambient beds alike.
+
+It is done two different ways, because there are two different endings:
+
+- **An ending that is known in advance** — a track playing out, a bed cut to
+  the length of its gap — is faded by the player itself, with an ffmpeg
+  `afade` filter worked out from the length. That is exact, sample-accurate
+  and costs nothing. It needs a player that takes filters, which means
+  **ffplay** (part of ffmpeg); mpv, afplay and cvlc play flat.
+- **An ending nobody scheduled** — you pressed skip, or stop — has no filter
+  to arrange, so the level is walked down through the system mixer instead
+  and the process is ended quiet. That works with any player, wherever the
+  mixer does (PulseAudio or PipeWire); without one the sound simply stops as
+  it always did. This fade is capped at 0.8s however long the setting is: a
+  skip still has to feel like a skip.
+
+```sh
+bgst config fade=2.5      # a long, slow swell
+bgst config fade=0        # straight in, straight out
+```
 
 ## Volume
 

@@ -176,7 +176,8 @@
   function armBan() {
     if (!state || !state.running || !state.now || state.now.kind === "silence") return;
     armed = state.now.name;
-    $("ban-confirm-label").textContent = `Ban ${armed.length > 28 ? "this track" : armed}`;
+    $("ban-confirm-label").textContent =
+      `Remove ${armed.length > 26 ? "this track" : armed}`;
     $("ban-confirm").classList.add("open");
     $("ban-confirm").removeAttribute("aria-hidden");
     $("ban-confirm").tabIndex = 0;
@@ -204,8 +205,8 @@
     if (!done) return;
     invalidate();
     toast(done.result.how === "unlinked"
-      ? `Banned ${done.result.name} — unlinked and skipped`
-      : `Banned ${done.result.name} — out of this playlist, file untouched`);
+      ? `Removed ${done.result.name} — unlinked and skipped`
+      : `Removed ${done.result.name} — out of this playlist, file untouched`);
   }
 
   function toggleBan() {
@@ -224,8 +225,12 @@
     const { config, now, running } = next;
 
     $("root-path").textContent = shortPath(config.root, 44);
+    // The word on the button is what pressing it does. Whether anything is
+    // live is a state, and states belong on a badge, not on a button.
     $("transport").dataset.on = String(running);
-    $("transport-label").textContent = running ? "Live" : "Play";
+    $("transport-label").textContent = running ? "Stop" : "Play";
+    $("transport").title = running ? "Stop playing" : "Start playing";
+    $("live-badge").hidden = !running;
     $("skip").disabled = !running;
     // In a party, skipping mutes the rest of a track rather than moving the
     // queue on: say so, so nobody fears it will put them out of step.
@@ -766,9 +771,12 @@
     gap_min: humanSeconds,
     gap_max: humanSeconds,
     ambient_chance: (v) => `${v}%`,
+    fade: (v) => (v ? `${(v / 10).toFixed(1)}s` : "off"),
     volume: (v) => `${v}`,
     ambient_volume: (v) => `${v}`,
   };
+  // What a slider's whole numbers mean: percent, or tenths of a second.
+  const SCALE = { ambient_chance: 100, fade: 10 };
 
   const isGap = (key) => GAPS.includes(key);
   const setReadout = (key, value) => {
@@ -780,7 +788,7 @@
   function syncSettings(config) {
     Object.keys(SLIDERS).forEach((key) => {
       if (document.activeElement === $(`${key}-out`)) return;   // mid-typing
-      const raw = key === "ambient_chance" ? config[key] * 100 : config[key];
+      const raw = config[key] * (SCALE[key] || 1);
       const value = Math.round(raw);
       $(key).value = isGap(key) ? sliderFromGap(value) : value;
       setReadout(key, value);
@@ -1399,7 +1407,7 @@
         await call("config", gapPatch(key, gapFromSlider(raw)));
         return;
       }
-      const done = await call("config", { [key]: key === "ambient_chance" ? raw / 100 : raw });
+      const done = await call("config", { [key]: raw / (SCALE[key] || 1) });
       if (done && done.live === false && key.endsWith("volume") && state.running) {
         toast("Volume applies from the next track — no system mixer here");
       }
@@ -1443,7 +1451,8 @@
     }
     if (event.key === " ") { event.preventDefault(); call("toggle", {}); }
     if (event.key === "n") { sitOut(); call("skip", {}); }
-    if (event.key === "b") toggleBan();      // once to arm, again to confirm
+    // R for remove; B still works for anyone who learnt it as "ban".
+    if (event.key === "b" || event.key === "r") toggleBan();
     if (event.key === "Escape") disarmBan();
   });
 

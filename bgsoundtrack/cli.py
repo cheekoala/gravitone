@@ -524,7 +524,7 @@ def _apply_play_overrides(config: Config, args) -> None:
 
 
 def _key_listener(controls: engine.Controls, on_ban=None) -> None:
-    """Single-key controls when we own a terminal: n next, b ban, q quit."""
+    """Single-key controls when we own a terminal: n next, r remove, q quit."""
     try:
         import termios
         import tty
@@ -543,7 +543,7 @@ def _key_listener(controls: engine.Controls, on_ban=None) -> None:
                 break
             if char in ("n", "s"):
                 controls.skip()
-            elif char == "b" and on_ban is not None:
+            elif char in ("b", "r") and on_ban is not None:
                 on_ban()
             elif char == "q":
                 controls.stop()
@@ -681,7 +681,7 @@ def cmd_play(args) -> int:
     if interactive:
         print(
             f"playing {playlist.name} with {backend.name} - "
-            "n: next, b: ban (skip and remove), q: quit"
+            "n: next, r: remove (skip and keep it out), q: quit"
         )
         threading.Thread(
             target=_key_listener, args=(controls, ban), daemon=True
