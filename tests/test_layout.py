@@ -231,3 +231,215 @@ def test_the_party_code_never_leaves_its_card(served, width):
             assert measured["sideways"] is False
         finally:
             browser.close()
+
+
+def test_a_slow_poll_cannot_undo_a_fresh_answer(served):
+    """A poll already on the wire when an action lands describes the world
+    before it. Painting one of those puts "no party" back on the screen."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=party]")
+            page.wait_for_selector("#party-off:not([hidden])", timeout=15000)
+            # Hold every state poll on the wire for three seconds, so the one
+            # in flight is guaranteed to land after the party has started.
+            page.evaluate(
+                """() => {
+                    const real = window.fetch;
+                    window.fetch = (url, opts) => real(url, opts).then(async (res) => {
+                        if (String(url).indexOf('/api/state') !== -1) {
+                            await new Promise((go) => setTimeout(go, 3000));
+                        }
+                        return res;
+                    });
+                    window.__swaps = [];
+                    const watch = (id) => new MutationObserver(() => {
+                        window.__swaps.push(id + (document.getElementById(id).hidden
+                            ? ':hidden' : ':shown'));
+                    }).observe(document.getElementById(id),
+                        { attributes: true, attributeFilter: ['hidden'] });
+                    watch('party-off');
+                    watch('party-on');
+                }"""
+            )
+            # Wait past a tick of the one-second poll, so a request carrying
+            # the pre-party world is certainly on the wire when we click.
+            page.wait_for_timeout(1200)
+            page.click("#party-host")
+            page.wait_for_selector("#party-on:not([hidden])", timeout=20000)
+            page.wait_for_timeout(4500)     # the stale answers land in here
+            swaps = page.evaluate("window.__swaps")
+            assert swaps.count("party-on:shown") == 1, swaps
+            assert swaps.count("party-off:shown") == 0, swaps
+        finally:
+            browser.close()
+
+
+def test_the_coming_up_list_is_not_rebuilt_every_second(served):
+    """It is polled once a second and rarely changes; replacing the rows
+    each time is what makes the card twitch."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=party]")
+            page.click("#party-host")
+            page.wait_for_selector("#party-on:not([hidden])", timeout=20000)
+            page.wait_for_selector("#party-next li", timeout=20000)
+            page.evaluate(
+                """() => {
+                    window.__rebuilds = 0;
+                    new MutationObserver((records) => {
+                        window.__rebuilds += records.length;
+                    }).observe(document.getElementById('party-next'),
+                               { childList: true });
+                }"""
+            )
+            page.wait_for_timeout(4500)      # four polls or so
+            assert page.evaluate("window.__rebuilds") == 0
+        finally:
+            browser.close()
+
+
+def test_sitting_a_track_out_says_so_until_the_party_moves_on(served):
+    """Skip in a party stops the sound without moving your place. With
+    nothing said, it looks like the button did nothing at all."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=party]")
+            page.click("#party-host")
+            page.wait_for_selector("#party-on:not([hidden])", timeout=20000)
+
+            page.click("[data-panel=now]")
+            page.evaluate("document.getElementById('skip').disabled = false")
+            page.click("#skip")
+            assert page.is_visible("#toast")
+            assert "Sitting this one out" in page.inner_text("#toast")
+            # The kicker is upper-cased by the stylesheet.
+            assert page.inner_text("#now-kind").lower() == "sitting this one out"
+
+            # Still there after several polls - a timer must not take it away.
+            page.wait_for_timeout(5000)
+            assert page.is_visible("#toast")
+            assert "stay" in page.get_attribute("#toast", "class")
+
+            # And it can be waved away by hand.
+            page.click("#toast")
+            assert page.is_hidden("#toast")
+        finally:
+            browser.close()
+
+
+def test_the_sit_out_clears_when_the_party_moves_on(served):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=party]")
+            page.click("#party-host")
+            page.wait_for_selector("#party-on:not([hidden])", timeout=20000)
+            page.click("[data-panel=now]")
+            page.evaluate("document.getElementById('skip').disabled = false")
+            page.click("#skip")
+            assert page.is_visible("#toast")
+            # Leaving the party is the party moving on as far as this page is
+            # concerned: there is no item to sit out any more.
+            page.click("[data-panel=party]")
+            page.click("#party-leave")
+            page.wait_for_selector("#party-off:not([hidden])", timeout=20000)
+            # The sticky note is gone (what replaces it is the ordinary
+            # "left the party" toast, which times out by itself).
+            assert "stay" not in (page.get_attribute("#toast", "class") or "")
+            assert "sitting" not in page.inner_text("#toast").lower()
+            assert page.inner_text("#now-kind").lower() != "sitting this one out"
+        finally:
+            browser.close()
+
+
+def test_the_button_says_what_pressing_it_does(served):
+    """Pressing the word "Live" to stop things read as a state, not a verb."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.wait_for_selector("#transport", timeout=15000)
+            assert page.inner_text("#transport").strip() == "Play"
+            assert page.is_hidden("#live-badge")
+
+            # Tell the page the server is playing, and let its own rendering
+            # decide what the button and the badge say.
+            page.evaluate(
+                """() => {
+                    const real = window.fetch;
+                    window.fetch = (url, opts) => real(url, opts).then(async (res) => {
+                        if (String(url).indexOf('/api/state') === -1) return res;
+                        const data = await res.json();
+                        data.running = true;
+                        return new Response(JSON.stringify(data), {
+                            status: 200,
+                            headers: { 'Content-Type': 'application/json' },
+                        });
+                    });
+                }"""
+            )
+            page.wait_for_function(
+                "() => document.getElementById('transport-label').textContent === 'Stop'",
+                timeout=15000,
+            )
+            assert page.is_visible("#live-badge")
+            assert "Live" in page.inner_text("#live-badge")
+            assert "stop" in page.get_attribute("#transport", "title").lower()
+        finally:
+            browser.close()
+
+
+def test_the_remove_button_does_not_say_ban(served):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.wait_for_selector("#ban", timeout=15000)
+            assert page.inner_text("#ban").strip() == "Remove"
+            assert "ban" not in (page.get_attribute("#ban", "title") or "").lower()
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize(
+    "width, cover, thumb",
+    [(1400, 288, 68), (900, 288, 68), (760, 148, 34), (400, 96, 34)],
+)
+def test_the_artwork_grows_where_there_is_room(served, width, cover, thumb):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": width, "height": 900})
+        try:
+            page.goto(served)
+            page.wait_for_selector("#now-cover", timeout=15000)
+            measured = page.evaluate(
+                """() => Math.round(document.querySelector(
+                    '#panel-now .cover, #panel-now .cover-holder'
+                ).getBoundingClientRect().width)"""
+            )
+            assert measured == cover
+            page.click("[data-panel=music]")
+            page.wait_for_selector("#music-list tr", timeout=15000)
+            cell = page.evaluate(
+                """() => Math.round(document.querySelector(
+                    '#music-list .col-cover').getBoundingClientRect().width)"""
+            )
+            assert cell >= thumb
+            assert page.evaluate(
+                "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+            )
+        finally:
+            browser.close()

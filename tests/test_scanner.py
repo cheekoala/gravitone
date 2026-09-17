@@ -279,10 +279,7 @@ def test_a_restart_does_not_reask_the_whole_library(tmp_path, monkeypatch):
     # Two files, and nothing known about either yet: their records are an
     # album tag away, so each is a job until the tags are read.
     assert first.find_covers() == 2
-    for _ in range(100):
-        if first._art_pending == 0:
-            break
-        time.sleep(0.02)
+    assert first.wait_for_covers(10)
     first._art.save()
 
     again = Session(config, tmp_path / "config.json", store=store)
@@ -418,10 +415,7 @@ def test_a_failed_art_scan_does_not_wedge_the_next_one(tmp_path, monkeypatch):
 
     monkeypatch.setattr(session._art, "_extract", boom)
     assert session.find_covers() == 1
-    for _ in range(200):
-        if session._art_pending == 0:
-            break
-        time.sleep(0.02)
+    assert session.wait_for_covers(10)
     assert session._art_pending == 0
     monkeypatch.setattr(
         session._art, "_extract", lambda path, remember_failure=True, under=None: None

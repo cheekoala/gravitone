@@ -40,6 +40,12 @@
   const limits = { music: 400, ambient: 400 };   // rows built at once
 
   // -- server ---------------------------------------------------------
+  // Bumped every time an action's answer is painted. A poll that was already
+  // in flight when that happened describes the world *before* it, so it is
+  // dropped rather than painted - otherwise starting a party (which the
+  // server does slowly, reading every tag) flickers back to "no party" each
+  // time a stale poll lands.
+  let generation = 0;
   let inFlight = 0;
   function busy(delta) {
     inFlight = Math.max(0, inFlight + delta);
@@ -85,13 +91,41 @@
     return payload;
   }
 
-  function toast(message, bad) {
+  function toast(message, bad, stay) {
     const node = $("toast");
     node.textContent = message;
     node.classList.toggle("bad", !!bad);
+    node.classList.toggle("stay", !!stay);
     node.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { node.hidden = true; }, 3600);
+    // A sticky toast is dismissed by what it is about ending, not by a timer.
+    if (!stay) toastTimer = setTimeout(() => { node.hidden = true; }, 3600);
+  }
+
+  function hideToast() {
+    clearTimeout(toastTimer);
+    $("toast").hidden = true;
+    $("toast").classList.remove("stay");
+  }
+
+  // Sitting a track out in a party: which item was on when skip was pressed.
+  // Skipping there stops the sound without moving your place, so there is
+  // nothing to see unless we say so - and it has to keep saying so until the
+  // party moves on by itself.
+  let sittingOut = null;
+  let comingShape = null;     // what the "coming up" list was last built from
+
+  const partyItem = (next) =>
+    (next && next.party && next.party.now && next.party.now.at) || null;
+
+  function sitOut() {
+    sittingOut = partyItem(state);
+    if (sittingOut === null) return;
+    toast("Sitting this one out — back with everyone at the next track", false, true);
+    // Say it now, not on the next render: a button whose effect is silence
+    // has to answer for itself immediately.
+    $("now-kind").textContent = "Sitting this one out";
+    $("panel-now").classList.add("is-sitting");
   }
 
   function offline(detail, lead) {
@@ -103,7 +137,10 @@
   async function call(route, body) {
     try {
       const next = await api(route, body);
-      if (next && next.config) render(next);
+      if (next && next.config) {
+        generation += 1;
+        render(next);
+      }
       return next;
     } catch (err) {
       // The usual cause of an unknown setting is a page newer than the
@@ -139,7 +176,8 @@
   function armBan() {
     if (!state || !state.running || !state.now || state.now.kind === "silence") return;
     armed = state.now.name;
-    $("ban-confirm-label").textContent = `Ban ${armed.length > 28 ? "this track" : armed}`;
+    $("ban-confirm-label").textContent =
+      `Remove ${armed.length > 26 ? "this track" : armed}`;
     $("ban-confirm").classList.add("open");
     $("ban-confirm").removeAttribute("aria-hidden");
     $("ban-confirm").tabIndex = 0;
@@ -167,8 +205,8 @@
     if (!done) return;
     invalidate();
     toast(done.result.how === "unlinked"
-      ? `Banned ${done.result.name} — unlinked and skipped`
-      : `Banned ${done.result.name} — out of this playlist, file untouched`);
+      ? `Removed ${done.result.name} — unlinked and skipped`
+      : `Removed ${done.result.name} — out of this playlist, file untouched`);
   }
 
   function toggleBan() {
@@ -187,8 +225,12 @@
     const { config, now, running } = next;
 
     $("root-path").textContent = shortPath(config.root, 44);
+    // The word on the button is what pressing it does. Whether anything is
+    // live is a state, and states belong on a badge, not on a button.
     $("transport").dataset.on = String(running);
-    $("transport-label").textContent = running ? "Live" : "Play";
+    $("transport-label").textContent = running ? "Stop" : "Play";
+    $("transport").title = running ? "Stop playing" : "Start playing";
+    $("live-badge").hidden = !running;
     $("skip").disabled = !running;
     // In a party, skipping mutes the rest of a track rather than moving the
     // queue on: say so, so nobody fears it will put them out of step.
@@ -201,6 +243,11 @@
     // The armed confirm belongs to one track; if that track is gone, so is it.
     if (armed && (!now || now.name !== armed)) disarmBan();
 
+    // The party moved on (or we left it): the sit-out is over.
+    if (sittingOut !== null && partyItem(next) !== sittingOut) {
+      sittingOut = null;
+      hideToast();
+    }
     renderParty(next);
 
     const nowPanel = $("panel-now");
@@ -216,7 +263,10 @@
       silence: "Silence",
       absent: "Playing for them, not here",
     };
-    $("now-kind").textContent = now ? kinds[now.kind] : (running ? "Starting" : "Idle");
+    $("now-kind").textContent = sittingOut !== null
+      ? "Sitting this one out"
+      : now ? kinds[now.kind] : (running ? "Starting" : "Idle");
+    nowPanel.classList.toggle("is-sitting", sittingOut !== null);
     $("now-title").textContent = now
       ? (now.kind === "silence" ? "Quiet" : (now.label || now.name))
       : (next.error ? "Stopped" : "Nothing playing");
@@ -721,9 +771,12 @@
     gap_min: humanSeconds,
     gap_max: humanSeconds,
     ambient_chance: (v) => `${v}%`,
+    fade: (v) => (v ? `${(v / 10).toFixed(1)}s` : "off"),
     volume: (v) => `${v}`,
     ambient_volume: (v) => `${v}`,
   };
+  // What a slider's whole numbers mean: percent, or tenths of a second.
+  const SCALE = { ambient_chance: 100, fade: 10 };
 
   const isGap = (key) => GAPS.includes(key);
   const setReadout = (key, value) => {
@@ -735,7 +788,7 @@
   function syncSettings(config) {
     Object.keys(SLIDERS).forEach((key) => {
       if (document.activeElement === $(`${key}-out`)) return;   // mid-typing
-      const raw = key === "ambient_chance" ? config[key] * 100 : config[key];
+      const raw = config[key] * (SCALE[key] || 1);
       const value = Math.round(raw);
       $(key).value = isGap(key) ? sliderFromGap(value) : value;
       setReadout(key, value);
@@ -1048,7 +1101,10 @@
     $("party-off").hidden = !!party;
     $("party-on").hidden = !party;
     document.querySelector('[data-panel="party"]').classList.toggle("live-on", !!party);
-    if (!party) return;
+    if (!party) {
+      comingShape = null;
+      return;
+    }
 
     $("party-name").textContent = party.name || "Party";
     $("party-kicker").textContent = party.over ? "Party finished" : "In a party";
@@ -1068,19 +1124,29 @@
     const done = on && on.duration ? Math.min(1, on.into / on.duration) : 0;
     $("party-progress").style.width = `${(done * 100).toFixed(1)}%`;
 
+    // Rebuilt only when it has actually changed. This is polled once a
+    // second and the next few items rarely differ between two polls;
+    // replacing the rows every time makes the card twitch.
     const coming = $("party-next");
-    coming.replaceChildren();
-    (party.next || []).forEach((item) => {
-      const row = el("li");
-      row.appendChild(el("span", "when", timeOfDay(item.at)));
-      const what = item.kind === "silence" ? "silence"
+    const rows = (party.next || []).map((item) => ({
+      when: timeOfDay(item.at),
+      what: (item.kind === "silence" ? "silence"
         : item.kind === "ambient" ? (item.label || "ambience")
-        : item.label;
-      row.appendChild(el("span", item.here ? "" : "gone",
-        what + (item.here ? "" : " (silence here)")));
-      coming.appendChild(row);
-    });
-    if (!coming.children.length) coming.appendChild(el("li", "empty", "—"));
+        : item.label) + (item.here ? "" : " (silence here)"),
+      here: item.here,
+    }));
+    const shape = JSON.stringify(rows);
+    if (shape !== comingShape) {
+      comingShape = shape;
+      coming.replaceChildren();
+      rows.forEach((row) => {
+        const line = el("li");
+        line.appendChild(el("span", "when", row.when));
+        line.appendChild(el("span", row.here ? "" : "gone", row.what));
+        coming.appendChild(line);
+      });
+      if (!rows.length) coming.appendChild(el("li", "empty", "—"));
+    }
 
     const missing = party.missing || [];
     $("party-missing").hidden = !missing.length;
@@ -1220,7 +1286,15 @@
     button.addEventListener("click", () => setSection(button.dataset.section)));
 
   $("transport").addEventListener("click", () => call("toggle", {}));
-  $("skip").addEventListener("click", () => call("skip", {}));
+  // A sticky toast can be waved away by hand; the sit-out itself stands.
+  $("toast").addEventListener("click", () => {
+    if ($("toast").classList.contains("stay")) hideToast();
+  });
+
+  $("skip").addEventListener("click", () => {
+    sitOut();
+    call("skip", {});
+  });
   $("ban").addEventListener("click", toggleBan);
   $("ban-confirm").addEventListener("click", confirmBan);
   document.addEventListener("click", (event) => {
@@ -1333,7 +1407,7 @@
         await call("config", gapPatch(key, gapFromSlider(raw)));
         return;
       }
-      const done = await call("config", { [key]: key === "ambient_chance" ? raw / 100 : raw });
+      const done = await call("config", { [key]: raw / (SCALE[key] || 1) });
       if (done && done.live === false && key.endsWith("volume") && state.running) {
         toast("Volume applies from the next track — no system mixer here");
       }
@@ -1376,8 +1450,9 @@
       return;
     }
     if (event.key === " ") { event.preventDefault(); call("toggle", {}); }
-    if (event.key === "n") call("skip", {});
-    if (event.key === "b") toggleBan();      // once to arm, again to confirm
+    if (event.key === "n") { sitOut(); call("skip", {}); }
+    // R for remove; B still works for anyone who learnt it as "ban".
+    if (event.key === "b" || event.key === "r") toggleBan();
     if (event.key === "Escape") disarmBan();
   });
 
@@ -1385,7 +1460,10 @@
   let failures = 0;
   async function poll() {
     try {
-      render(await api("state", undefined, true));   // quiet: no activity bar
+      const seen = generation;
+      const next = await api("state", undefined, true);   // quiet: no activity bar
+      // An action landed while this was on the wire: its answer is newer.
+      if (generation === seen) render(next);
       failures = 0;
       if (!state || !state.stale) $("offline").hidden = true;
     } catch (err) {

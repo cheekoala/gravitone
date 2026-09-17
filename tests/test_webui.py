@@ -791,3 +791,73 @@ def test_the_party_says_what_is_coming(server):
 def test_an_unknown_party_action_is_a_clear_error(server):
     with pytest.raises(urllib.error.HTTPError):
         request(server[0], "/api/party", {"action": "conga"})
+
+
+def test_starting_a_party_mid_song_does_not_blank_the_player(server, monkeypatch):
+    """The engine has to be replaced - the party's schedule is a different
+    one - but a page polling through that swap should never be told that
+    nothing is playing."""
+    import threading
+    import time as clock
+
+    from bgsoundtrack import engine, player
+
+    httpd, session, config, _ = server
+    with_music(config, session)
+
+    def hold(self, on_event=None):
+        """An engine that names one track and then just keeps running."""
+        if on_event:
+            on_event(engine.Event("track", path=config.music_dir / "01 Song.mp3"))
+        while not self.controls.stopping:
+            clock.sleep(0.02)
+
+    monkeypatch.setattr(
+        player, "detect", lambda *a, **k: player.Backend("test", "/bin/true")
+    )
+    monkeypatch.setattr(engine.Engine, "run", hold)
+    # Starting the new engine takes a moment, as it does with a real library:
+    # it has to work out which of the party's tracks are on this machine.
+    slow = session.start
+
+    def unhurried(*args, **kwargs):
+        clock.sleep(0.3)
+        return slow(*args, **kwargs)
+
+    monkeypatch.setattr(session, "start", unhurried)
+
+    session.start()
+    for _ in range(100):
+        if session._now is not None:
+            break
+        clock.sleep(0.02)
+    assert session.running and session._now is not None
+
+    seen = []
+    watching = threading.Event()
+
+    def watch() -> None:
+        while not watching.is_set():
+            seen.append(session.snapshot()["now"])
+            clock.sleep(0.01)
+
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    try:
+        request(httpd, "/api/party", {"action": "host"})
+    finally:
+        watching.set()
+        watcher.join(timeout=2)
+
+    assert seen, "the watcher should have polled through the swap"
+    assert all(item is not None for item in seen), "the player went blank"
+
+
+def test_the_party_says_when_the_current_item_began(server):
+    """An instant every machine in the party agrees on - it is what the page
+    uses to tell one item from the next."""
+    httpd, session, config, _ = server
+    with_music(config, session)
+    party = request(httpd, "/api/party", {"action": "host"})["party"]
+    assert party["now"]["at"] == pytest.approx(party["epoch"], abs=1)
+    assert party["now"]["at"] + party["now"]["duration"] > party["now"]["at"]

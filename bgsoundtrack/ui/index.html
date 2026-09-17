@@ -27,9 +27,9 @@
         <svg viewBox="0 0 24 24" class="icon"><path d="M6 5l9 7-9 7V5z"/><rect x="16" y="5" width="2.4" height="14" rx="1"/></svg>
       </button>
       <div class="ban-wrap">
-        <button class="ghost ban" id="ban" title="Ban: skip and remove from this playlist (B)" disabled>
+        <button class="ghost ban" id="ban" title="Skip this track and keep it out of this playlist (R)" disabled>
           <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="8.4"/><path d="M6.2 6.2l11.6 11.6"/></svg>
-          <span>Ban</span>
+          <span>Remove</span>
         </button>
         <!-- Floats down on its own layer; the button above never moves. -->
         <button class="confirm-ban" id="ban-confirm" tabindex="-1" aria-hidden="true">
@@ -37,8 +37,11 @@
           <span id="ban-confirm-label">Confirm</span>
         </button>
       </div>
-      <button class="live" id="transport" data-on="false">
-        <span class="live-dot"></span><span id="transport-label">Play</span>
+      <span class="live-badge" id="live-badge" hidden aria-live="polite">
+        <span class="live-dot"></span>Live
+      </span>
+      <button class="live" id="transport" data-on="false" title="Start playing">
+        <span class="live-dot" id="transport-dot"></span><span id="transport-label">Play</span>
       </button>
     </div>
   </header>
@@ -324,6 +327,13 @@
             <input type="range" id="volume" min="0" max="100" step="1"><output id="volume-out"></output></label>
           <label class="field"><span>Ambience volume</span>
             <input type="range" id="ambient_volume" min="0" max="100" step="1"><output id="ambient_volume-out"></output></label>
+          <label class="field"><span>Fade</span>
+            <input type="range" id="fade" min="0" max="50" step="1"><output id="fade-out"></output></label>
+          <p class="hint">
+            How long sound takes to arrive and to leave — including when you
+            skip, so nothing is cut off mid-note. Off plays every track from
+            its first sample.
+          </p>
         </div>
         <div class="card">
           <div class="kicker">Playlists</div>

@@ -220,7 +220,7 @@ def test_engine_rebuilds_its_queue_when_the_playlist_changes(config, tmp_path, m
 
         kill = terminate
 
-    def fake_play(backend, path, volume=70, duration=None):
+    def fake_play(backend, path, volume=70, duration=None, **rest):
         played.append(path.name)
         return player.Playback(Done(), path)
 

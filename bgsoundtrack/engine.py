@@ -139,20 +139,44 @@ class Engine:
 
     # -- waiting ---------------------------------------------------------
 
+    # An unplanned ending is faded through the mixer, which is slower and
+    # less exact than a filter, so it is kept short: a skip still has to feel
+    # like a skip.
+    INTERRUPT_FADE = 0.8
+
+    def _cut(self, playback: player.Playback | None, level: int) -> None:
+        """End a sound that was interrupted, rather than dropping it.
+
+        Nothing scheduled this, so the player's own fade cannot help: the
+        sound is walked down through the mixer and the process ended quiet.
+        Where there is no mixer it simply stops, as it always did.
+        """
+        if playback is None:
+            return
+        playback.fade_out(
+            min(self.config.fade, self.INTERRUPT_FADE),
+            volume=level,
+            sleep=self._sleep,
+        )
+
     def _wait(self, seconds: float, playback: player.Playback | None = None) -> None:
         """Sleep in slices so skip/stop stay responsive, stopping playback early."""
         deadline = self._monotonic() + seconds
+        cut = False
         while True:
             remaining = deadline - self._monotonic()
             if remaining <= 0:
                 break
             if self.controls.stopping or self.controls.take_skip():
+                cut = True
                 break
             if playback is not None and not playback.running:
                 break
             self._sleep(min(0.2, remaining))
-        if playback is not None:
-            playback.stop()
+        if cut:
+            self._cut(playback, self.config.ambient_volume)
+        elif playback is not None:
+            playback.stop()      # it ran its course, and faded itself out
 
     # -- the session -----------------------------------------------------
 
@@ -197,7 +221,13 @@ class Engine:
 
             track = queue.pop(0)
             emit(Event("track", path=track))
-            playback = player.play(self.backend, track, volume=self.config.volume)
+            playback = player.play(
+                self.backend,
+                track,
+                volume=self.config.volume,
+                fade=self.config.fade,
+                length=player.probe_duration(track),
+            )
             self._hold(playback, "track")
             self._wait_for_track(playback)
             if self.controls.stopping:
@@ -219,6 +249,7 @@ class Engine:
                     volume=self.config.ambient_volume,
                     duration=gap,
                     start=start,
+                    fade=self.config.fade,
                 )
                 self._hold(bed_playback, "ambient")
                 self._wait(gap, bed_playback)
@@ -267,6 +298,7 @@ class Engine:
                     volume=self.config.volume,
                     duration=remaining,
                     start=into,
+                    fade=self.config.fade,
                 )
                 self._hold(playback, "track")
             elif item.kind == "ambient" and path is not None:
@@ -278,6 +310,7 @@ class Engine:
                     volume=self.config.ambient_volume,
                     duration=remaining,
                     start=start,
+                    fade=self.config.fade,
                 )
                 self._hold(playback, "ambient")
             elif item.member is not None:
@@ -301,12 +334,16 @@ class Engine:
             if remaining <= 0 or self.controls.stopping:
                 break
             if self.controls.take_skip() and playback is not None:
-                playback.stop()
+                # Sitting this one out: the sound leaves, the slot stays.
+                self._cut(playback, self.config.volume)
                 self._hold(None, None)
                 playback = None
             self._sleep(min(0.2, remaining))
         if playback is not None:
-            playback.stop()
+            if self.controls.stopping:
+                self._cut(playback, self.config.volume)
+            else:
+                playback.stop()   # its slot ended; it faded itself out
 
     def _hold(self, playback: player.Playback | None, kind: str | None) -> None:
         self._playback, self._playing = playback, kind
@@ -330,7 +367,7 @@ class Engine:
     def _wait_for_track(self, playback: player.Playback) -> None:
         while playback.running:
             if self.controls.stopping or self.controls.take_skip():
-                playback.stop()
+                self._cut(playback, self.config.volume)
                 return
             self._sleep(0.2)
         playback.wait()

@@ -1,6 +1,7 @@
 """Long gaps, ambient start offsets, hidden mode, banning, live volume."""
 
 import random
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -308,12 +309,199 @@ def test_bgst_play_prints_events_without_crashing(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr(
         engine_module.player,
         "play",
-        lambda backend, path, volume=70, duration=None, start=None: player_module.Playback(
-            Done(), path
-        ),
+        lambda backend, path, volume=70, duration=None, start=None, **rest:
+            player_module.Playback(Done(), path),
     )
     monkeypatch.setattr(engine_module.time, "sleep", lambda _s: None)
 
     assert cli.main(["play", "--no-keys", "--no-loop", "--gap-min", "0", "--gap-max", "0"]) == 0
     out = capsys.readouterr().out
     assert "song.mp3" in out and "stopped" in out
+
+
+# -- fades: sound arrives and leaves, it does not appear and vanish ------
+
+
+def test_a_track_is_eased_in_and_out_when_its_length_is_known():
+    made = player.Backend("ffplay", "/usr/bin/ffplay").fades(1.5, None, None, 200.0)
+    assert made == "afade=t=in:st=0:d=1.500,afade=t=out:st=198.500:d=1.500"
+
+
+def test_a_bed_fades_over_the_stretch_that_is_actually_played():
+    """It is seeked into and cut to the gap, so the end is the gap's end."""
+    made = player.Backend("ffplay", "/usr/bin/ffplay").fades(1.5, 30.0, 66.6, 300.0)
+    assert made == "afade=t=in:st=0:d=1.500,afade=t=out:st=28.500:d=1.500"
+
+
+def test_without_a_length_the_sound_still_arrives_gently():
+    made = player.Backend("ffplay", "/usr/bin/ffplay").fades(1.5, None, None, None)
+    assert made == "afade=t=in:st=0:d=1.500"
+
+
+def test_two_fades_never_meet_in_the_middle_of_a_short_bed():
+    made = player.Backend("ffplay", "/usr/bin/ffplay").fades(1.5, 2.0, None, None)
+    assert made == "afade=t=in:st=0:d=0.667,afade=t=out:st=1.333:d=0.667"
+
+
+def test_a_sliver_of_sound_is_left_alone():
+    assert player.Backend("ffplay", "/usr/bin/ffplay").fades(1.5, 0.3, None, None) == ""
+
+
+def test_fades_can_be_turned_off():
+    assert player.Backend("ffplay", "/usr/bin/ffplay").fades(0, 30.0, None, 200.0) == ""
+
+
+def test_the_player_is_told_to_fade():
+    command = player.Backend("ffplay", "/usr/bin/ffplay").command(
+        Path("/music/a.flac"), 70, None, None, 1.5, 200.0
+    )
+    assert "-af" in command
+    assert command[command.index("-af") + 1].startswith("afade=t=in")
+
+
+def test_a_player_without_a_fade_filter_is_left_alone():
+    """mpv and the rest get their fade from the mixer instead of a filter."""
+    for name in ("mpv", "afplay", "cvlc"):
+        command = player.Backend(name, f"/usr/bin/{name}").command(
+            Path("/music/a.flac"), 70, None, None, 1.5, 200.0
+        )
+        assert "-af" not in command
+        assert not any("afade" in part for part in command)
+
+
+class Fading:
+    """A process that is still running, with a mixer that takes volumes."""
+
+    def __init__(self, mixer_works=True):
+        self.levels = []
+        self.stopped = False
+        self.mixer_works = mixer_works
+
+    def poll(self):
+        return None
+
+    def set_volume(self, level):
+        self.levels.append(level)
+        return self.mixer_works
+
+    def stop(self):
+        self.stopped = True
+
+
+def test_an_interrupted_sound_is_walked_down_before_it_stops(monkeypatch):
+    """Skip has no filter to schedule: the mixer does the fading."""
+    playback = player.Playback.__new__(player.Playback)
+    fake = Fading()
+    playback.process = fake
+    playback.set_volume = fake.set_volume
+    playback.stop = fake.stop
+    slept = []
+
+    assert playback.fade_out(0.8, volume=70, steps=8, sleep=slept.append) is True
+    assert fake.levels == [61, 52, 44, 35, 26, 18, 9, 0]
+    assert fake.stopped
+    assert sum(slept) == pytest.approx(0.8)
+
+
+def test_without_a_mixer_the_sound_simply_stops(monkeypatch):
+    playback = player.Playback.__new__(player.Playback)
+    fake = Fading(mixer_works=False)
+    playback.process = fake
+    playback.set_volume = fake.set_volume
+    playback.stop = fake.stop
+    slept = []
+
+    assert playback.fade_out(0.8, volume=70, sleep=slept.append) is False
+    assert fake.stopped
+    assert slept == []          # nothing to wait for
+
+
+def test_skipping_a_track_fades_it_rather_than_cutting_it(config, monkeypatch):
+    faded = []
+
+    class Playing:
+        running = True
+
+        def fade_out(self, seconds, volume=100, steps=8, sleep=None):
+            faded.append((seconds, volume))
+            return True
+
+        def stop(self):
+            faded.append(("cut", None))
+
+        def wait(self, timeout=None):
+            return 0
+
+    eng = make_engine(config)
+    eng.controls.skip()
+    eng._wait_for_track(Playing())
+    assert faded == [(min(config.fade, engine.Engine.INTERRUPT_FADE), config.volume)]
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg is not installed")
+def test_the_fade_filter_really_quietens_the_audio(tmp_path):
+    """The flag is only a promise; this listens to what comes out."""
+    import array
+    import wave
+
+    source = tmp_path / "tone.flac"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=8", str(source)],
+        check=True,
+    )
+    made = player.Backend("ffplay", "/usr/bin/ffplay").fades(1.5, None, None, 8.0)
+    rendered = {}
+    for name, filters in (("plain", None), ("faded", made)):
+        out = tmp_path / f"{name}.wav"
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-i", str(source)]
+            + (["-af", filters] if filters else [])
+            + [str(out)],
+            check=True,
+        )
+        with wave.open(str(out)) as handle:
+            rate, channels = handle.getframerate(), handle.getnchannels()
+            raw = array.array("h")
+            raw.frombytes(handle.readframes(handle.getnframes()))
+        rendered[name] = (raw[::channels], rate)
+
+    def loudest(name, start, end):
+        mono, rate = rendered[name]
+        piece = mono[int(start * rate):int(end * rate)]
+        return max(abs(value) for value in piece) / 32768
+
+    level = loudest("plain", 4.0, 4.1)
+    assert level > 0.05, "the test tone should be audible to begin with"
+    assert loudest("faded", 0, 0.05) < level / 8          # arrives from nothing
+    assert loudest("faded", 7.95, 8.0) < level / 8        # and leaves the same way
+    # ...and the stretch in between is untouched.
+    assert loudest("faded", 4.0, 4.1) == pytest.approx(level, rel=0.02)
+
+
+@pytest.mark.skipif(
+    not (shutil.which("ffplay") and shutil.which("ffmpeg")),
+    reason="ffplay is not installed",
+)
+def test_ffplay_accepts_the_command_we_build(tmp_path):
+    """A filter ffmpeg understands is not automatically one ffplay takes."""
+    import os
+
+    source = tmp_path / "tone.flac"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+         "-i", "sine=frequency=440:duration=1", str(source)],
+        check=True,
+    )
+    backend = player.Backend("ffplay", shutil.which("ffplay"))
+    command = backend.command(source, 60, 0.6, 0.2, 1.5, 1.0)
+    assert "-af" in command
+    done = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "SDL_AUDIODRIVER": "dummy"},
+    )
+    assert done.returncode == 0, done.stderr
+    assert "error" not in done.stderr.lower(), done.stderr

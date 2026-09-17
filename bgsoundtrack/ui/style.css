@@ -114,7 +114,23 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   background: var(--panel-2); border: 1px solid var(--line);
   font-weight: 550; transition: background .15s, border-color .15s;
 }
-.live[data-on="true"] { background: rgba(20,184,143,.14); border-color: var(--accent-dim); color: #7ff0d0; }
+/* Playing: the button is the way out, so it stays neutral - the green
+   belongs to the badge that says something is on. */
+.live[data-on="true"] { background: var(--panel-2); border-color: var(--line); color: var(--text); }
+.live[data-on="true"]:hover { border-color: #33333a; background: #1b1b20; }
+.live[data-on="false"] { background: rgba(20,184,143,.14); border-color: var(--accent-dim); color: #7ff0d0; }
+.live[data-on="true"] #transport-dot { display: none; }
+.live-badge {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 12px; border-radius: 999px;
+  background: rgba(20,184,143,.14); border: 1px solid var(--accent-dim);
+  color: #7ff0d0; font-size: 12.5px; font-weight: 550; letter-spacing: .02em;
+  white-space: nowrap;
+}
+.live-badge .live-dot {
+  background: var(--accent); box-shadow: 0 0 0 3px rgba(20,184,143,.18);
+  animation: pulse 2s infinite;
+}
 .live:hover { border-color: #33333a; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .live[data-on="true"] .live-dot { background: var(--accent); box-shadow: 0 0 0 3px rgba(20,184,143,.18); animation: pulse 2s infinite; }
@@ -494,6 +510,16 @@ td.col-cover { padding-right: 0; }
   max-width: min(520px, calc(100vw - 32px));
 }
 .toast.bad { border-color: rgba(229,72,77,.5); color: #ffb4b6; }
+/* A toast that stays until the thing it is about is over. */
+.toast.stay {
+  border-color: var(--accent-dim);
+  color: #7ff0d0;
+  background: rgba(20, 184, 143, .1);
+  cursor: pointer;
+}
+/* Sitting a track out: the party plays on, this room is quiet. */
+.is-sitting .cover, .is-sitting .now-title { opacity: .5; }
+.is-sitting .progress-fill { background: var(--faint); }
 [hidden] { display: none !important; }
 
 /* -- small screens ------------------------------------------------- */
@@ -602,3 +628,15 @@ td.col-cover { padding-right: 0; }
 .primary:hover:not(:disabled) { background: rgba(20, 184, 143, .22); border-color: var(--accent); }
 .primary:disabled { opacity: .4; cursor: not-allowed; }
 .primary.small { padding: 5px 12px; font-size: 12.5px; border-radius: 8px; }
+
+/* -- desktop: the artwork is the point, so let it be seen ------------ */
+@media (min-width: 900px) {
+  .cover, .cover-holder { width: 288px; height: 288px; }
+  .cover.empty { font-size: 72px; }
+  .now-head { gap: 24px; }
+  .now-title { font-size: 26px; }
+  .col-cover { width: 88px; }
+  .thumb, .sk-thumb { width: 68px; height: 68px; border-radius: 8px; }
+  /* A taller row wants a little more air around the text beside it. */
+  tbody td { padding-top: 7px; padding-bottom: 7px; }
+}
