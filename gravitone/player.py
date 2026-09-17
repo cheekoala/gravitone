@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from bgsoundtrack import mixer
+from gravitone import mixer
 
 
 class PlaybackError(Exception):

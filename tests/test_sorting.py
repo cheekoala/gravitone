@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from bgsoundtrack import library, playlists, tags
-from bgsoundtrack.config import Config
+from gravitone import library, playlists, tags
+from gravitone.config import Config
 
 
 @pytest.fixture
@@ -182,7 +182,7 @@ def test_a_duration_is_cached_with_the_rest(tmp_path):
 
 
 def test_show_filenames_is_a_setting():
-    from bgsoundtrack.config import Config as C
+    from gravitone.config import Config as C
 
     assert C().show_filenames is True
     cfg = C(show_filenames=False)

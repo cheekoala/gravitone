@@ -94,7 +94,7 @@ class Scanner:
     def _start(self) -> None:
         if self._worker and self._worker.is_alive():
             return
-        self._worker = threading.Thread(target=self._run, daemon=True, name="bgst-scan")
+        self._worker = threading.Thread(target=self._run, daemon=True, name="gravitone-scan")
         self._worker.start()
 
     def _run(self) -> None:

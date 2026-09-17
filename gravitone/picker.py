@@ -1,7 +1,7 @@
 """Open the operating system's own folder/file chooser.
 
 The UI runs in a browser, and a browser's file input hands over file contents,
-never paths - useless for linking. So when the machine running `bgst ui` has
+never paths - useless for linking. So when the machine running `gravitone ui` has
 Tk available (it ships with most Python builds), we open the real chooser
 there and send back the path that was picked.
 

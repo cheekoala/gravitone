@@ -2,7 +2,7 @@
 
 Two ways in, and they mix freely:
 
-* **Linked** - `bgst link` puts a symlink in the 'custom soundtrack' folder,
+* **Linked** - `gravitone link` puts a symlink in the 'custom soundtrack' folder,
   pointing at the file where it already lives. Adding a 40 GB collection
   costs a few kilobytes of directory entries, and you curate track by track.
 * **Source folders** - a folder played in place. Nothing is added to the
@@ -18,14 +18,14 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from bgsoundtrack import playlists, scanner, tags
-from bgsoundtrack.config import (
+from gravitone import playlists, scanner, tags
+from gravitone.config import (
     AUDIO_EXTENSIONS,
     AMBIENT_DIRNAME,
     MUSIC_DIRNAME,
     Config,
 )
-from bgsoundtrack.playlists import Playlist
+from gravitone.playlists import Playlist
 
 SECTIONS = ("music", "ambient")
 
@@ -287,7 +287,7 @@ def linked_entries(
     return found
 
 
-from bgsoundtrack.config import SORTS
+from gravitone.config import SORTS
 
 
 def sort_entries(

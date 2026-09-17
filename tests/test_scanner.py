@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from bgsoundtrack import art, library, playlists, scanner
-from bgsoundtrack.config import Config
+from gravitone import art, library, playlists, scanner
+from gravitone.config import Config
 
 
 def album(directory, *names):
@@ -88,7 +88,7 @@ def test_the_version_moves_only_when_the_contents_change(index, tmp_path):
 
 def test_a_poll_does_not_rescan(tmp_path, monkeypatch):
     """The 1s poll used to re-walk every folder; now it must not walk at all."""
-    from bgsoundtrack.service import Session
+    from gravitone.service import Session
 
     folder = album(tmp_path / "music", *[f"{n:03d}.mp3" for n in range(200)])
     config = Config(root=str(tmp_path / "lib"))
@@ -107,7 +107,7 @@ def test_a_poll_does_not_rescan(tmp_path, monkeypatch):
 
 
 def test_counts_are_recomputed_when_something_changes(tmp_path):
-    from bgsoundtrack.service import Session
+    from gravitone.service import Session
 
     folder = album(tmp_path / "music", "a.mp3")
     config = Config(root=str(tmp_path / "lib"))
@@ -264,7 +264,7 @@ def test_files_without_a_picture_are_not_handed_to_ffmpeg(tmp_path, monkeypatch)
 
 def test_a_restart_does_not_reask_the_whole_library(tmp_path, monkeypatch):
     """The point of writing answers down: a second run reads no files."""
-    from bgsoundtrack.service import Session
+    from gravitone.service import Session
 
     folder = album(tmp_path / "music" / "Artist" / "Album", "a.mp3", "b.mp3")
     config = Config(root=str(tmp_path / "lib"))
@@ -301,7 +301,7 @@ class FakeTags:
         self.albums = albums
 
     def known(self, path):
-        from bgsoundtrack.tags import Tags
+        from gravitone.tags import Tags
 
         name = Path(path).name
         if name in self.albums:
@@ -400,7 +400,7 @@ def test_a_picture_without_the_usual_marker_still_counts(tmp_path, monkeypatch):
 def test_a_failed_art_scan_does_not_wedge_the_next_one(tmp_path, monkeypatch):
     """A scan that dies used to leave the counter up, and every later
     'find album art' then did nothing at all, silently."""
-    from bgsoundtrack.service import Session
+    from gravitone.service import Session
 
     album(tmp_path / "music" / "Artist" / "Album", "a.mp3")
     config = Config(root=str(tmp_path / "lib"))

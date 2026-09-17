@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from bgsoundtrack import instance, library, picker, webui
-from bgsoundtrack.config import Config
-from bgsoundtrack.service import Session
+from gravitone import instance, library, picker, webui
+from gravitone.config import Config
+from gravitone.service import Session
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def request(httpd, route, body=None, token=None):
     url = f"http://127.0.0.1:{httpd.server_port}{route}"
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, method="POST" if data else "GET")
-    req.add_header("X-BGST-Token", httpd.token if token is None else token)
+    req.add_header("X-Gravitone-Token", httpd.token if token is None else token)
     req.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(req, timeout=5) as response:
         payload = response.read()
@@ -123,7 +123,7 @@ def test_play_without_a_player_reports_the_problem(server, monkeypatch):
 
 def test_static_files_are_served(server):
     httpd, *_ = server
-    for route, needle in (("/", b"<title>bgst</title>"), ("/app.js", b"bgst"), ("/style.css", b"--accent")):
+    for route, needle in (("/", b"<title>Gravitone</title>"), ("/app.js", b"gravitone"), ("/style.css", b"--accent")):
         assert needle in request(httpd, route)
 
 
@@ -341,7 +341,7 @@ def test_the_note_points_at_a_real_server(tmp_path):
 
 
 def test_the_library_carries_what_the_table_shows(server, tmp_path, monkeypatch):
-    from bgsoundtrack import tags
+    from gravitone import tags
 
     httpd, session, config, _ = server
     album = tmp_path / "album"
@@ -425,7 +425,7 @@ def test_an_unexpected_error_answers_with_json_and_a_hint(server, monkeypatch):
     assert caught.value.code == 500
     body = json.loads(caught.value.read())
     assert "sort_desc" in body["error"]
-    assert "bgst ui --stop" in body["hint"]
+    assert "gravitone ui --stop" in body["hint"]
 
 
 # -- covers, labels and server control ----------------------------------
@@ -466,7 +466,7 @@ def test_a_cover_needs_the_token(server, tmp_path):
 
 
 def test_now_playing_is_named_from_its_tags(server, tmp_path):
-    from bgsoundtrack import engine, tags
+    from gravitone import engine, tags
 
     httpd, session, *_ = server
     song = tmp_path / "album" / "01 Anchor.mp3"
@@ -481,7 +481,7 @@ def test_now_playing_is_named_from_its_tags(server, tmp_path):
 
 
 def test_an_untagged_track_keeps_its_file_name(server, tmp_path):
-    from bgsoundtrack import engine
+    from gravitone import engine
 
     httpd, session, *_ = server
     song = tmp_path / "album" / "mystery.mp3"
@@ -507,7 +507,7 @@ def test_state_reports_what_the_server_is_doing(server):
 
 def test_a_linked_track_shows_its_own_tags_and_art(server, tmp_path):
     """A link plays by its own path; its tags and cover belong to the file."""
-    from bgsoundtrack import engine, library, tags
+    from gravitone import engine, library, tags
 
     httpd, session, config, _ = server
     real = tmp_path / "Artist" / "Album" / "01 Song.mp3"
@@ -532,7 +532,7 @@ def test_a_linked_track_shows_its_own_tags_and_art(server, tmp_path):
 
 
 def test_the_playing_track_gets_read_without_opening_the_table(server, tmp_path, monkeypatch):
-    from bgsoundtrack import engine, tags
+    from gravitone import engine, tags
 
     httpd, session, *_ = server
     song = tmp_path / "album" / "01 Song.mp3"
@@ -552,7 +552,7 @@ def test_the_playing_track_gets_read_without_opening_the_table(server, tmp_path,
 
 
 def test_a_cover_can_be_asked_for_by_the_link_or_the_file(server, tmp_path):
-    from bgsoundtrack import library
+    from gravitone import library
 
     httpd, session, config, _ = server
     real = tmp_path / "Artist" / "Album" / "song.mp3"
@@ -574,7 +574,7 @@ def test_a_cover_can_be_asked_for_by_the_link_or_the_file(server, tmp_path):
 
 
 def test_history_catches_up_when_tags_arrive(server, tmp_path):
-    from bgsoundtrack import engine, tags
+    from gravitone import engine, tags
 
     httpd, session, *_ = server
     song = tmp_path / "album" / "01 Song.mp3"
@@ -593,7 +593,7 @@ def test_history_catches_up_when_tags_arrive(server, tmp_path):
 
 def with_music(config, session, names=("01 Song.mp3", "02 Other.mp3", "03 Third.mp3")):
     """A playlist with tags already read, as a party needs."""
-    from bgsoundtrack import library, tags
+    from gravitone import library, tags
 
     made = []
     folder = library.section_dir(config, "music", session.playlist)
@@ -642,9 +642,9 @@ def test_hosting_a_party_gives_a_code_and_says_what_is_in_it(server):
 
 def test_a_second_machine_joins_with_the_code_alone(server, tmp_path):
     """Same music, different folders: the code is the whole handshake."""
-    from bgsoundtrack import library
-    from bgsoundtrack.config import Config
-    from bgsoundtrack.service import Session
+    from gravitone import library
+    from gravitone.config import Config
+    from gravitone.service import Session
 
     httpd, session, config, _ = server
     with_music(config, session)
@@ -668,9 +668,9 @@ def test_a_bigger_library_on_the_other_side_still_joins(server, tmp_path):
     A code alone cannot say *which* three of their four tracks are in it, so
     the party file does - and once it has, the code is enough from then on.
     """
-    from bgsoundtrack import library
-    from bgsoundtrack.config import Config
-    from bgsoundtrack.service import Session
+    from gravitone import library
+    from gravitone.config import Config
+    from gravitone.service import Session
 
     httpd, session, config, _ = server
     with_music(config, session)
@@ -696,9 +696,9 @@ def test_a_bigger_library_on_the_other_side_still_joins(server, tmp_path):
 
 def test_joining_finds_the_playlist_the_party_is_about(server, tmp_path):
     """Their own music is one playlist, the shared library another."""
-    from bgsoundtrack import library
-    from bgsoundtrack.config import Config
-    from bgsoundtrack.service import Session
+    from gravitone import library
+    from gravitone.config import Config
+    from gravitone.service import Session
 
     httpd, session, config, _ = server
     with_music(config, session)
@@ -719,9 +719,9 @@ def test_joining_finds_the_playlist_the_party_is_about(server, tmp_path):
 
 
 def test_a_smaller_library_joins_and_is_told_what_it_lacks(server, tmp_path):
-    from bgsoundtrack import library
-    from bgsoundtrack.config import Config
-    from bgsoundtrack.service import Session
+    from gravitone import library
+    from gravitone.config import Config
+    from gravitone.service import Session
 
     httpd, session, config, _ = server
     with_music(config, session)
@@ -741,9 +741,9 @@ def test_a_smaller_library_joins_and_is_told_what_it_lacks(server, tmp_path):
 
 
 def test_a_code_for_unknown_music_asks_for_the_party_file(server, tmp_path):
-    from bgsoundtrack import library
-    from bgsoundtrack.config import Config
-    from bgsoundtrack.service import Session
+    from gravitone import library
+    from gravitone.config import Config
+    from gravitone.service import Session
 
     httpd, session, config, _ = server
     with_music(config, session)
@@ -768,7 +768,7 @@ def test_leaving_a_party_puts_things_back(server):
 
 def test_a_party_survives_the_server_restarting(server, tmp_path):
     """The party is still going on; this machine just stepped out."""
-    from bgsoundtrack.service import Session
+    from gravitone.service import Session
 
     httpd, session, config, _ = server
     with_music(config, session)
@@ -800,7 +800,7 @@ def test_starting_a_party_mid_song_does_not_blank_the_player(server, monkeypatch
     import threading
     import time as clock
 
-    from bgsoundtrack import engine, player
+    from gravitone import engine, player
 
     httpd, session, config, _ = server
     with_music(config, session)
@@ -861,3 +861,54 @@ def test_the_party_says_when_the_current_item_began(server):
     party = request(httpd, "/api/party", {"action": "host"})["party"]
     assert party["now"]["at"] == pytest.approx(party["epoch"], abs=1)
     assert party["now"]["at"] + party["now"]["duration"] > party["now"]["at"]
+
+
+# -- the file browser ----------------------------------------------------
+
+
+def test_browsing_says_what_is_inside_each_folder(server, tmp_path):
+    """So you can tell a record from a box of records without opening it."""
+    tree = tmp_path / "Game Soundtracks"
+    (tree / "Morrowind" / "Disc 1").mkdir(parents=True)
+    (tree / "Oblivion").mkdir()
+    for index in range(3):
+        (tree / "Morrowind" / "Disc 1" / f"{index}.flac").write_bytes(b"\0")
+    for index in range(5):
+        (tree / "Oblivion" / f"{index}.mp3").write_bytes(b"\0")
+    (tree / "loose.flac").write_bytes(b"\0")
+
+    httpd, *_ = server
+    listing = request(httpd, f"/api/browse?path={urllib.parse.quote(str(tree))}")
+    by_name = {d["name"]: d for d in listing["dirs"]}
+    assert by_name["Morrowind"] == {
+        "name": "Morrowind", "path": str(tree / "Morrowind"), "audio": 0, "folders": 1,
+    }
+    assert by_name["Oblivion"]["audio"] == 5
+    assert by_name["Oblivion"]["folders"] == 0
+    assert [f["name"] for f in listing["files"]] == ["loose.flac"]
+
+
+def test_browsing_hands_back_every_step_of_the_path(server, tmp_path):
+    """Every step is a way back, not just the one directly above."""
+    deep = tmp_path / "one" / "two" / "three"
+    deep.mkdir(parents=True)
+    httpd, *_ = server
+    listing = request(httpd, f"/api/browse?path={urllib.parse.quote(str(deep))}")
+
+    names = [crumb["name"] for crumb in listing["crumbs"]]
+    paths = [crumb["path"] for crumb in listing["crumbs"]]
+    assert names[0] == "/" and names[-3:] == ["one", "two", "three"]
+    assert paths[-1] == str(deep)
+    assert paths[-2] == str(deep.parent)
+    # Each one is a real place, and they only ever get longer.
+    assert paths == sorted(paths, key=len)
+
+
+def test_a_hidden_folder_is_not_counted_as_contents(server, tmp_path):
+    folder = tmp_path / "album"
+    (folder / ".git").mkdir(parents=True)
+    (folder / "a.flac").write_bytes(b"\0")
+    httpd, *_ = server
+    listing = request(httpd, f"/api/browse?path={urllib.parse.quote(str(tmp_path))}")
+    assert listing["dirs"][0]["folders"] == 0
+    assert listing["dirs"][0]["audio"] == 1

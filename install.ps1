@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  bgst installer for Windows (PowerShell 5.1+ / PowerShell 7+).
+  gravitone installer for Windows (PowerShell 5.1+ / PowerShell 7+).
 
 .EXAMPLE
   .\install.ps1
@@ -16,24 +16,24 @@ param(
   [switch]$Uninstall,
   [switch]$Shortcut,
   [switch]$NoShortcut,
-  [string]$Venv = "$env:LOCALAPPDATA\bgst\venv"
+  [string]$Venv = "$env:LOCALAPPDATA\gravitone\venv"
 )
 
 $ErrorActionPreference = 'Stop'
 $src = Split-Path -Parent $MyInvocation.MyCommand.Path
 $shims = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
-$startMenu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\bgst.lnk"
+$startMenu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\gravitone.lnk"
 
 function Step($text) { Write-Host "==> $text" -ForegroundColor Green }
 function Warn($text) { Write-Host "!!  $text" -ForegroundColor Yellow }
 
 if ($Uninstall) {
-  Step 'Removing bgst'
+  Step 'Removing gravitone'
   if (Test-Path $Venv) { Remove-Item -Recurse -Force $Venv }
   if (Test-Path $startMenu) { Remove-Item -Force $startMenu }
-  $desktopLink = Join-Path ([Environment]::GetFolderPath('Desktop')) 'bgst.lnk'
+  $desktopLink = Join-Path ([Environment]::GetFolderPath('Desktop')) 'gravitone.lnk'
   if (Test-Path $desktopLink) { Remove-Item -Force $desktopLink }
-  Get-ChildItem "$shims\bgst.*" -ErrorAction SilentlyContinue | Remove-Item -Force
+  Get-ChildItem "$shims\gravitone.*" -ErrorAction SilentlyContinue | Remove-Item -Force
   Write-Host 'Removed. Your library and config were left alone.'
   return
 }
@@ -65,14 +65,14 @@ Step "Creating a virtual environment in $Venv"
 & $python.Exe @($python.Args + @('-m', 'venv', $Venv))
 $venvPython = Join-Path $Venv 'Scripts\python.exe'
 & $venvPython -m pip install --quiet --upgrade pip
-Step 'Installing bgst'
+Step 'Installing gravitone'
 & $venvPython -m pip install --quiet $src
 
 # -- shim on PATH ---------------------------------------------------------
-$venvBgst = Join-Path $Venv 'Scripts\bgst.exe'
+$venvGravitone = Join-Path $Venv 'Scripts\gravitone.exe'
 New-Item -ItemType Directory -Force -Path $shims | Out-Null
-$shim = Join-Path $shims 'bgst.cmd'
-"@echo off`r`n`"$venvBgst`" %*" | Set-Content -Encoding ASCII $shim
+$shim = Join-Path $shims 'gravitone.cmd'
+"@echo off`r`n`"$venvGravitone`" %*" | Set-Content -Encoding ASCII $shim
 Step "Added $shim"
 
 # -- audio player ---------------------------------------------------------
@@ -92,7 +92,7 @@ if ($havePlayer) {
     Invoke-Expression $command
   } else {
     Write-Host ''
-    Write-Host 'No audio player found. bgst needs ffmpeg, mpv or VLC.'
+    Write-Host 'No audio player found. gravitone needs ffmpeg, mpv or VLC.'
     $reply = Read-Host "Run '$command' now? [y/N]"
     if ($reply -match '^[yY]') { Invoke-Expression $command } else { Write-Host 'Skipped.' }
   }
@@ -101,11 +101,11 @@ if ($havePlayer) {
 # -- shortcuts ------------------------------------------------------------
 function Add-Shortcuts {
   $shell = New-Object -ComObject WScript.Shell
-  foreach ($target in @($startMenu, (Join-Path ([Environment]::GetFolderPath('Desktop')) 'bgst.lnk'))) {
+  foreach ($target in @($startMenu, (Join-Path ([Environment]::GetFolderPath('Desktop')) 'gravitone.lnk'))) {
     $link = $shell.CreateShortcut($target)
     $link.TargetPath = Join-Path $Venv 'Scripts\pythonw.exe'
-    $link.Arguments = '-m bgsoundtrack ui'
-    $link.Description = 'bgst - custom game soundtrack player'
+    $link.Arguments = '-m gravitone ui'
+    $link.Description = 'gravitone - custom game soundtrack player'
     $link.Save()
   }
   Step 'Added Start Menu and desktop shortcuts'
@@ -124,11 +124,11 @@ if ($wantShortcuts) {
 # -- symlink note ---------------------------------------------------------
 Write-Host ''
 Write-Host 'Note: Windows only allows symlinks when Developer Mode is on'
-Write-Host '(Settings > System > For developers). Without it bgst falls back to'
+Write-Host '(Settings > System > For developers). Without it gravitone falls back to'
 Write-Host 'hard links, which also use no extra space but cannot cross drives.'
 
 Write-Host ''
 Step 'Done'
-Write-Host '  bgst ui                      open the control panel'
-Write-Host '  bgst link C:\Users\you\Music add music (links, no copies)'
-Write-Host '  bgst play                    play from the terminal'
+Write-Host '  gravitone ui                      open the control panel'
+Write-Host '  gravitone link C:\Users\you\Music add music (links, no copies)'
+Write-Host '  gravitone play                    play from the terminal'

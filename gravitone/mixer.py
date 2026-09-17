@@ -17,10 +17,10 @@ import os
 import shutil
 import subprocess
 
-# Shows up in the desktop mixer as "bgst" instead of "ffplay", so per-app
+# Shows up in the desktop mixer as "gravitone" instead of "ffplay", so per-app
 # volume set there sticks to us rather than to whichever player we spawned.
 STREAM_ENV = {
-    "PULSE_PROP_application.name": "bgst",
+    "PULSE_PROP_application.name": "gravitone",
     "PULSE_PROP_application.icon_name": "multimedia-audio-player",
     "PULSE_PROP_media.role": "music",
 }

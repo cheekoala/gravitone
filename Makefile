@@ -27,10 +27,10 @@ test:
 	$(PYTHON) -m pytest -q
 
 ui:
-	$(PYTHON) -m bgsoundtrack ui
+	$(PYTHON) -m gravitone ui
 
 run:
-	$(PYTHON) -m bgsoundtrack play
+	$(PYTHON) -m gravitone play
 
 clean:
 	rm -rf build dist *.egg-info .pytest_cache .venv

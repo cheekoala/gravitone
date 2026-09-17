@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from bgsoundtrack import library, playlists, webui
-from bgsoundtrack.config import Config
-from bgsoundtrack.service import Session
+from gravitone import library, playlists, webui
+from gravitone.config import Config
+from gravitone.service import Session
 
 playwright = pytest.importorskip("playwright.sync_api", reason="playwright not installed")
 
-CHROME = os.environ.get("BGST_TEST_CHROME") or shutil.which("chromium") or shutil.which(
+CHROME = os.environ.get("GRAVITONE_TEST_CHROME") or shutil.which("chromium") or shutil.which(
     "google-chrome"
 ) or "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
 
@@ -30,7 +30,7 @@ LONG_ALBUM = "An Album With An Unreasonably Long Title (Deluxe Anniversary Editi
 
 @pytest.fixture
 def served(tmp_path):
-    from bgsoundtrack import tags
+    from gravitone import tags
 
     album = tmp_path / "music" / "Artist" / "Album"
     album.mkdir(parents=True)
@@ -440,6 +440,135 @@ def test_the_artwork_grows_where_there_is_room(served, width, cover, thumb):
             assert cell >= thumb
             assert page.evaluate(
                 "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+            )
+        finally:
+            browser.close()
+
+
+@pytest.fixture
+def served_tree(tmp_path):
+    """A server plus a folder tree worth exploring."""
+    tree = tmp_path / "Game Soundtracks"
+    (tree / "Morrowind" / "Disc 1").mkdir(parents=True)
+    (tree / "Oblivion").mkdir()
+    for index in range(4):
+        (tree / "Morrowind" / "Disc 1" / f"{index:02d} song.flac").write_bytes(b"\0")
+        (tree / "Oblivion" / f"{index:02d} song.flac").write_bytes(b"\0")
+    (tree / "loose.flac").write_bytes(b"\0")
+
+    config = Config(root=str(tmp_path / "custom soundtrack"))
+    store = playlists.Store()
+    library.init(config, store.current())
+    session = Session(config, tmp_path / "config.json", store=store)
+    httpd = webui.serve(session, host="127.0.0.1", port=0, open_browser=False)
+    yield f"http://127.0.0.1:{httpd.server_port}/#{httpd.token}", tree
+    session.stop()
+    httpd.shutdown()
+
+
+def open_browser_at(page, url, where):
+    page.goto(url)
+    page.click("[data-panel=add]")
+    page.fill("#path-input", str(where))
+    page.press("#path-input", "Enter")
+    page.wait_for_selector(".browser li.dir", timeout=15000)
+
+
+def test_a_folder_opens_where_it_stands(served_tree):
+    """Cascading downward: you can see inside without leaving where you are."""
+    url, tree = served_tree
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            open_browser_at(page, url, tree)
+            before = page.inner_text("#crumb")
+            page.click(".browser li.dir:has-text('Morrowind') .twisty")
+            page.wait_for_selector(".browser li.branch-of", timeout=15000)
+
+            # The child is there, indented, and we have not gone anywhere.
+            child = page.locator(".browser li.dir:has-text('Disc 1')")
+            assert child.count() == 1
+            assert page.inner_text("#crumb") == before
+            depth = page.evaluate(
+                """() => document.querySelector(".browser li.dir:nth-of-type(3)")
+                        .style.getPropertyValue('--depth')"""
+            )
+            assert depth == "1"
+            indent = page.evaluate(
+                """() => {
+                    const rows = [...document.querySelectorAll('#browser li')];
+                    const parent = rows.find((r) => r.innerText.includes('Morrowind'));
+                    const child = rows.find((r) => r.innerText.includes('Disc 1'));
+                    return child.getBoundingClientRect().left
+                         - parent.getBoundingClientRect().left;
+                }"""
+            )
+            assert indent > 10, "a branch should visibly step right"
+
+            # And it folds away again.
+            page.click(".browser li.dir:has-text('Morrowind') .twisty")
+            page.wait_for_timeout(200)
+            assert page.locator(".browser li.dir:has-text('Disc 1')").count() == 0
+        finally:
+            browser.close()
+
+
+def test_back_and_up_are_different_journeys(served_tree):
+    """Up goes to the parent; Back goes where you actually were."""
+    url, tree = served_tree
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(url)
+            page.click("[data-panel=add]")
+            page.wait_for_selector("#browse-back", timeout=15000)
+            assert page.is_disabled("#browse-back")      # nowhere to go back to yet
+
+            page.fill("#path-input", str(tree))
+            page.press("#path-input", "Enter")
+            page.wait_for_selector(".browser li.dir", timeout=15000)
+            page.click(".browser li.dir:has-text('Oblivion') .t-body")
+            page.wait_for_function(
+                "() => document.getElementById('crumb').innerText.includes('Oblivion')",
+                timeout=15000,
+            )
+            assert not page.is_disabled("#browse-back")
+
+            page.click("#browse-up")                     # to the parent
+            page.wait_for_function(
+                "() => !document.getElementById('crumb').innerText.includes('Oblivion')",
+                timeout=15000,
+            )
+            page.click("#browse-back")                   # back to Oblivion
+            page.wait_for_function(
+                "() => document.getElementById('crumb').innerText.includes('Oblivion')",
+                timeout=15000,
+            )
+        finally:
+            browser.close()
+
+
+def test_the_path_is_offered_a_step_at_a_time(served_tree):
+    url, tree = served_tree
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            open_browser_at(page, url, tree)
+            steps = page.locator("#crumb .crumb-step")
+            assert steps.count() >= 3
+            assert "here" in (steps.last.get_attribute("class") or "")
+            # The root is a slash already; it must not read as "//".
+            assert "//" not in page.inner_text("#crumb")
+
+            # Clicking a step goes there.
+            page.locator("#crumb .crumb-step").nth(steps.count() - 2).click()
+            page.wait_for_function(
+                "(name) => !document.getElementById('crumb').innerText.endsWith(name)",
+                arg="Game Soundtracks",
+                timeout=15000,
             )
         finally:
             browser.close()

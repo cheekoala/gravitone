@@ -20,7 +20,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bgsoundtrack.config import Config
+from gravitone.config import Config
 
 DEFAULT_ID = "default"
 DEFAULT_NAME = "Library"
@@ -97,7 +97,7 @@ class Playlist:
 
 
 def store_path(config_path: Path | None = None) -> Path:
-    from bgsoundtrack.config import config_path as default_config_path
+    from gravitone.config import config_path as default_config_path
 
     base = config_path or default_config_path()
     return base.parent / "playlists.json"

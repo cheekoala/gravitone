@@ -22,8 +22,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from bgsoundtrack import library, party as party_module, player, playlists
-from bgsoundtrack.config import Config
+from gravitone import library, party as party_module, player, playlists
+from gravitone.config import Config
 
 
 @dataclass(frozen=True)
@@ -208,7 +208,7 @@ class Engine:
                 if not music:
                     raise RuntimeError(
                         f"nothing to play in {playlist.name} - add music with "
-                        f"'bgst folder add <folder>' or 'bgst link <path>'"
+                        f"'gravitone folder add <folder>' or 'gravitone link <path>'"
                     )
 
             if not queue:

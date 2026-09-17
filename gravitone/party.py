@@ -38,7 +38,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bgsoundtrack.config import Config, config_path
+from gravitone.config import Config, config_path
 
 VERSION = 1
 # Crockford's base32: no I, L, O or U, so nothing reads as something else
@@ -192,13 +192,25 @@ class Party:
     roster: Roster
     name: str = ""
 
+    # The key this was written under before the app had a name. A party file
+    # somebody already has in a shared folder should still open.
+    STAMPS = ("gravitone_party", "bgst_party")
+
+    @staticmethod
+    def stamp(raw: dict):
+        """The format version in a party file, whichever name wrote it."""
+        for key in Party.STAMPS:
+            if key in raw:
+                return raw[key]
+        return None
+
     @property
     def code(self) -> str:
         return encode(self)
 
     def as_dict(self) -> dict:
         return {
-            "bgst_party": VERSION,
+            "gravitone_party": VERSION,
             "name": self.name,
             "seed": self.seed,
             "epoch": self.epoch,
@@ -209,9 +221,9 @@ class Party:
 
     @classmethod
     def from_dict(cls, raw: dict) -> "Party":
-        if int(raw.get("bgst_party") or 0) > VERSION:
+        if int(cls.stamp(raw) or 0) > VERSION:
             raise PartyError(
-                "this party file was made by a newer bgst - update and try again"
+                "this party file was made by a newer gravitone - update and try again"
             )
         return cls(
             seed=int(raw.get("seed") or 0),
@@ -293,7 +305,7 @@ def _unpack(raw: bytes) -> dict:
         raise PartyError("that code is the wrong length")
     if raw[0] != VERSION:
         raise PartyError(
-            f"that code is from bgst party version {raw[0]}, and this is {VERSION}"
+            f"that code is from gravitone party version {raw[0]}, and this is {VERSION}"
         )
     seed = struct.unpack(">I", raw[1:5])[0]
     epoch = int.from_bytes(raw[5:10], "big")
@@ -528,7 +540,7 @@ def _real(path: Path) -> Path:
 
 def members(config: Config, playlist, reader, section: str = "music") -> list:
     """A section of a playlist, named the way a party names things."""
-    from bgsoundtrack import library
+    from gravitone import library
 
     found = []
     for entry in library.entries(config, section, playlist, reader=reader):
@@ -560,7 +572,7 @@ def here(config: Config, playlist, reader) -> dict:
     Keyed the way the roster is, so a match needs nothing in common but the
     music itself - not a path, not a file name, not a folder layout.
     """
-    from bgsoundtrack import library
+    from gravitone import library
 
     found = {}
     for section in library.SECTIONS:
@@ -577,7 +589,7 @@ def read_tags(config: Config, playlist, reader) -> int:
     A party is planned against track lengths; a guessed length would put the
     two machines on different timetables.
     """
-    from bgsoundtrack import library
+    from gravitone import library
 
     targets = [
         entry.target
@@ -652,7 +664,7 @@ def write_file(party: Party, path: Path) -> Path:
     """The party as a file to hand over, roster and all."""
     path = Path(path).expanduser()
     if path.is_dir():
-        path = path / "bgst-party.json"
+        path = path / "gravitone-party.json"
     if not path.suffix:
         path = path.with_suffix(".json")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -668,8 +680,8 @@ def read_file(path: Path) -> Party:
         raise PartyError(f"cannot read {path}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise PartyError(f"{path.name} is not a party file: {exc}") from exc
-    if "bgst_party" not in raw:
-        raise PartyError(f"{path.name} is not a bgst party file")
+    if Party.stamp(raw) is None:
+        raise PartyError(f"{path.name} is not a gravitone party file")
     return Party.from_dict(raw)
 
 
@@ -687,7 +699,7 @@ def join(code: str, roster: Roster | None = None, config_file: Path | None = Non
     if roster is None:
         raise PartyError(
             "this code is for a set of tracks this machine has not seen. "
-            "Ask for the party file that goes with it (bgst party save), "
+            "Ask for the party file that goes with it (gravitone party save), "
             "then join again - the code alone works from then on."
         )
     return Party(

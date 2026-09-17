@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<title>bgst</title>
+<title>Gravitone</title>
+  <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IgogICAgIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iR3Jhdml0b25lIj4KICA8dGl0bGU+R3Jhdml0b25lPC90aXRsZT4KICA8ZGVzYz5BIG1hc3MsIGFuZCB0aGUgd2F2ZXMgY29taW5nIG9mZiBpdC48L2Rlc2M+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImdyYXZpdG9uZS1tYXJrIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzE0Yjg4ZiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM3YzNhZWQiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgPC9kZWZzPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iMzIiIHI9IjgiIGZpbGw9InVybCgjZ3Jhdml0b25lLW1hcmspIi8+CiAgPGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ1cmwoI2dyYXZpdG9uZS1tYXJrKSIgc3Ryb2tlLXdpZHRoPSI0LjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+CiAgICA8cGF0aCBkPSJNNDEuMTggMTguODkgQTE2IDE2IDAgMCAxIDQxLjE4IDQ1LjExIiBvcGFjaXR5PSIuODUiLz4KICAgIDxwYXRoIGQ9Ik0yMi44MiA0NS4xMSBBMTYgMTYgMCAwIDEgMjIuODIgMTguODkiIG9wYWNpdHk9Ii44NSIvPgogICAgPHBhdGggZD0iTTQ4LjczIDEzLjQyIEEyNSAyNSAwIDAgMSA0OC43MyA1MC41OCIgb3BhY2l0eT0iLjUiLz4KICAgIDxwYXRoIGQ9Ik0xNS4yNyA1MC41OCBBMjUgMjUgMCAwIDEgMTUuMjcgMTMuNDIiIG9wYWNpdHk9Ii41Ii8+CiAgPC9nPgo8L3N2Zz4K">
 <link rel="stylesheet" href="style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>♪</text></svg>">
 </head>
 <body>
 <div class="activity" id="activity"></div>
@@ -14,26 +14,40 @@
 
   <header class="topbar">
     <div class="brand">
-      <span class="brand-dot"></span>
-      <span class="brand-name">bgst</span>
+      <svg viewBox="0 0 64 64" class="brand-mark" role="img" aria-label="Gravitone">
+        <defs>
+          <linearGradient id="brand-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#14b88f"/>
+            <stop offset="1" stop-color="#7c3aed"/>
+          </linearGradient>
+        </defs>
+        <circle cx="32" cy="32" r="8" fill="url(#brand-grad)"/>
+        <g fill="none" stroke="url(#brand-grad)" stroke-width="4.6" stroke-linecap="round">
+          <path d="M41.18 18.89 A16 16 0 0 1 41.18 45.11" opacity=".85"/>
+          <path d="M22.82 45.11 A16 16 0 0 1 22.82 18.89" opacity=".85"/>
+          <path d="M48.73 13.42 A25 25 0 0 1 48.73 50.58" opacity=".5"/>
+          <path d="M15.27 50.58 A25 25 0 0 1 15.27 13.42" opacity=".5"/>
+        </g>
+      </svg>
+      <span class="brand-name">Gravitone</span>
       <label class="playlist-pick">
         <select id="playlist-select" title="Playlist"></select>
-        <svg viewBox="0 0 24 24" class="icon chev"><path d="M6 9l6 6 6-6"/></svg>
+        <svg viewBox="0 0 24 24" class="icon chev"><path d="m6 9 6 6 6-6"/></svg>
       </label>
       <span class="brand-sub" id="root-path"></span>
     </div>
     <div class="topbar-actions">
       <button class="ghost" id="skip" title="Next track (N)" disabled>
-        <svg viewBox="0 0 24 24" class="icon"><path d="M6 5l9 7-9 7V5z"/><rect x="16" y="5" width="2.4" height="14" rx="1"/></svg>
+        <svg viewBox="0 0 24 24" class="icon"><path d="M21 4v16"/> <path d="M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z"/></svg>
       </button>
       <div class="ban-wrap">
         <button class="ghost ban" id="ban" title="Skip this track and keep it out of this playlist (R)" disabled>
-          <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="8.4"/><path d="M6.2 6.2l11.6 11.6"/></svg>
+          <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="10"/> <line x1="9" x2="15" y1="15" y2="9"/></svg>
           <span>Remove</span>
         </button>
         <!-- Floats down on its own layer; the button above never moves. -->
         <button class="confirm-ban" id="ban-confirm" tabindex="-1" aria-hidden="true">
-          <svg viewBox="0 0 24 24" class="icon"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+          <svg viewBox="0 0 24 24" class="icon"><path d="M20 6 9 17l-5-5"/></svg>
           <span id="ban-confirm-label">Confirm</span>
         </button>
       </div>
@@ -47,35 +61,35 @@
   </header>
 
   <div class="offline" id="offline" hidden>
-    <strong id="offline-lead">This page needs the bgst server.</strong>
-    <span id="offline-detail">Start it with <code>bgst ui</code> — it opens the working page for you.
+    <strong id="offline-lead">This page needs the gravitone server.</strong>
+    <span id="offline-detail">Start it with <code>gravitone ui</code> — it opens the working page for you.
     Opening <code>index.html</code> straight from the folder cannot reach your files.</span>
   </div>
 
   <div class="body">
     <nav class="rail" role="tablist" aria-label="Sections">
       <button class="rail-btn active" data-panel="now" title="Now playing" role="tab">
-        <svg viewBox="0 0 24 24" class="icon"><path d="M9 18V6l10-2v12"/><circle cx="7" cy="18" r="2.6"/><circle cx="17" cy="16" r="2.6"/></svg>
+        <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="10"/> <path d="M6 12c0-1.7.7-3.2 1.8-4.2"/> <circle cx="12" cy="12" r="2"/> <path d="M18 12c0 1.7-.7 3.2-1.8 4.2"/></svg>
         <span>Now</span>
       </button>
-      <button class="rail-btn" data-panel="music" title="Music library" role="tab">
-        <svg viewBox="0 0 24 24" class="icon"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
-        <span>Music</span>
+      <button class="rail-btn" data-panel="music" title="This playlist's music" role="tab">
+        <svg viewBox="0 0 24 24" class="icon"><path d="M16 5H3"/> <path d="M11 12H3"/> <path d="M11 19H3"/> <path d="M21 16V5"/> <circle cx="18" cy="16" r="3"/></svg>
+        <span>Playlist</span>
       </button>
-      <button class="rail-btn" data-panel="ambient" title="Ambient library" role="tab">
-        <svg viewBox="0 0 24 24" class="icon"><path d="M3 9h10a3 3 0 1 0-3-3M3 14h14a3 3 0 1 1-3 3M3 19h7"/></svg>
+      <button class="rail-btn" data-panel="ambient" title="Wind, rain, and whatever else fills a gap" role="tab">
+        <svg viewBox="0 0 24 24" class="icon"><path d="M12.8 19.6A2 2 0 1 0 14 16H2"/> <path d="M17.5 8a2.5 2.5 0 1 1 2 4H2"/> <path d="M9.8 4.4A2 2 0 1 1 11 8H2"/></svg>
         <span>Ambient</span>
       </button>
-      <button class="rail-btn" data-panel="add" title="Add files" role="tab">
-        <svg viewBox="0 0 24 24" class="icon"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6M9 14h6"/></svg>
+      <button class="rail-btn" data-panel="add" title="Find music and add it" role="tab">
+        <svg viewBox="0 0 24 24" class="icon"><path d="M12 10v6"/> <path d="M9 13h6"/> <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
         <span>Add</span>
       </button>
       <button class="rail-btn" data-panel="party" title="Listen with someone else" role="tab">
-        <svg viewBox="0 0 24 24" class="icon"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9.5" r="2.4"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M15.5 19a4.4 4.4 0 0 1 5-4.3"/></svg>
+        <svg viewBox="0 0 24 24" class="icon"><path d="M18 21a8 8 0 0 0-16 0"/> <circle cx="10" cy="8" r="5"/> <path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3"/></svg>
         <span>Party</span>
       </button>
       <button class="rail-btn" data-panel="settings" title="Settings" role="tab">
-        <svg viewBox="0 0 24 24" class="icon"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M21.2 12h-3M5.8 12h-3M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1M18.5 18.5l-2.1-2.1M7.6 7.6L5.5 5.5"/></svg>
+        <svg viewBox="0 0 24 24" class="icon"><path d="M14 17H5"/> <path d="M19 7h-9"/> <circle cx="17" cy="17" r="3"/> <circle cx="7" cy="7" r="3"/></svg>
         <span>Config</span>
       </button>
     </nav>
@@ -207,10 +221,10 @@
       <!-- LIBRARIES -->
       <section class="panel" id="panel-music">
         <div class="panel-head">
-          <h2>Music <span class="count" id="music-count">0</span></h2>
+          <h2>Playlist <span class="count" id="music-count">0</span></h2>
           <div class="head-tools">
             <label class="search">
-              <svg viewBox="0 0 24 24" class="icon"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+              <svg viewBox="0 0 24 24" class="icon"><path d="m21 21-4.34-4.34"/> <circle cx="11" cy="11" r="8"/></svg>
               <input type="search" class="filter" data-filter-for="music" placeholder="Search title, artist, album…  ( / )" autocomplete="off" spellcheck="false">
               <span class="found" id="music-found" hidden></span>
             </label>
@@ -242,7 +256,7 @@
           <h2>Ambient <span class="count" id="ambient-count">0</span></h2>
           <div class="head-tools">
             <label class="search">
-              <svg viewBox="0 0 24 24" class="icon"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+              <svg viewBox="0 0 24 24" class="icon"><path d="m21 21-4.34-4.34"/> <circle cx="11" cy="11" r="8"/></svg>
               <input type="search" class="filter" data-filter-for="ambient" placeholder="Search title, artist, album…  ( / )" autocomplete="off" spellcheck="false">
               <span class="found" id="ambient-found" hidden></span>
             </label>
@@ -273,7 +287,7 @@
       <!-- ADD -->
       <section class="panel" id="panel-add">
         <div class="panel-head">
-          <h2>Add to library</h2>
+          <h2>Add music</h2>
           <div class="seg" id="section-toggle">
             <button class="seg-btn active" data-section="music">Music</button>
             <button class="seg-btn" data-section="ambient">Ambient</button>
@@ -287,7 +301,7 @@
         </p>
         <div class="add-tools">
           <button class="ghost small" id="pick-folder">
-            <svg viewBox="0 0 24 24" class="icon"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <svg viewBox="0 0 24 24" class="icon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
             Choose a folder…
           </button>
           <form class="path-form" id="path-form">
@@ -300,7 +314,20 @@
           <input type="text" id="folder-playlist-name" placeholder="Playlist name" autocomplete="off">
           <button class="ghost small" type="submit">Create &amp; select</button>
         </form>
-        <div class="shortcuts" id="shortcuts"></div>
+        <div class="browser-bar">
+          <div class="browser-nav">
+            <button class="ghost small" id="browse-back" title="Where you were before (Backspace)" disabled>
+              <svg viewBox="0 0 24 24" class="icon"><path d="m12 19-7-7 7-7"/> <path d="M19 12H5"/></svg>Back
+            </button>
+            <button class="ghost small" id="browse-up" title="The folder this one is in (Alt+Up)">
+              <svg viewBox="0 0 24 24" class="icon"><path d="M14 9 9 4 4 9"/> <path d="M20 20h-7a4 4 0 0 1-4-4V4"/></svg>Up
+            </button>
+            <button class="ghost small" id="browse-home" title="Your home folder">
+              <svg viewBox="0 0 24 24" class="icon"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/> <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Home
+            </button>
+          </div>
+          <div class="shortcuts" id="shortcuts"></div>
+        </div>
         <div class="crumb" id="crumb"></div>
         <ul class="browser" id="browser"></ul>
       </section>

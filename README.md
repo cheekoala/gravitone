@@ -1,11 +1,17 @@
-# custom_bg_game_soundtrack_player
+<img src="docs/icon.svg" width="72" align="left" alt="">
 
-Play a custom list of music files, with a customizable random silence / ambient
-track duration in between.
+# Gravitone
 
-Point it at music you already have, and it plays a shuffled soundtrack behind
-whatever game you're in — with a random gap after each song that is either
-silence or a bed of ambience (wind, rain, tavern noise, crickets).
+**Your own soundtrack for any game.** Point it at music you already have and
+it plays a shuffled soundtrack behind whatever you're in — with a random gap
+after each song that is either silence or a bed of ambience (wind, rain,
+tavern noise, crickets).
+
+<br clear="left">
+
+A graviton is the particle that would carry gravity, if we ever catch one;
+a tone is what you'd hear if it arrived. The mark is a mass with the waves
+coming off it.
 
 - **Playlists.** Two folders you switch between — one per game, per mood, per
   session. Each keeps its own links, its own folders, and remembers which
@@ -20,17 +26,21 @@ silence or a bed of ambience (wind, rain, tavern noise, crickets).
 - **Random gaps with sane defaults** — 12–45 s, 65 % of them ambient, the rest
   silence — tunable anywhere from none to a full hour, and hideable if you
   would rather not know how long the quiet lasts.
-- **A tiny control panel** (`bgst ui`) that runs in your browser, or on your
-  phone as a remote — no Electron, no build step, no dependencies.
+- **Listening together, offline.** A 32-character code and a shared clock put
+  two machines on the same evening, with nothing running between them.
+- **A tiny control panel** (`gravitone ui`) that runs in your browser, or on
+  your phone as a remote — no Electron, no build step, no dependencies.
 - **No Python dependencies.** Playback goes through `ffplay`, `mpv`, `afplay`
   or `vlc`, whichever you have.
 
-![The bgst control panel, with Remove armed and its confirm dropped below](docs/ui-now.png)
+The command is `gravitone`, and `grav` for short.
+
+![The gravitone control panel, with Remove armed and its confirm dropped below](docs/ui-now.png)
 
 ## Install
 
 One script per platform. Each installs into a private virtualenv (or pipx if
-you have it), puts `bgst` on your PATH, and offers to install an audio player
+you have it), puts `gravitone` on your PATH, and offers to install an audio player
 if you have none.
 
 **Linux, macOS, *BSD, WSL**
@@ -58,14 +68,14 @@ pipx install .          # or: pip install --user .
 The installer offers to add a menu entry and a desktop shortcut (`--shortcut`
 / `--no-shortcut` to decide up front; `-Shortcut` / `-NoShortcut` on Windows),
 and to put `~/.local/bin` on your PATH if it isn't already (`--path` /
-`--no-path`) — otherwise `bgst` installs fine and then `command not found`.
+`--no-path`) — otherwise `gravitone` installs fine and then `command not found`.
 It writes one line to your shell's own profile (`.zshrc`, `.bashrc`,
 `config.fish`, `.profile`), once; open a new terminal afterwards. Until then
-the full path works: `~/.local/bin/bgst ui`.
+the full path works: `~/.local/bin/gravitone ui`.
 
 When it offers to open the control panel at the end, it starts it **detached**
 (`setsid`), so the UI keeps running after that terminal window closes —
-logging to `~/.local/state/bgst/ui.log`.
+logging to `~/.local/state/gravitone/ui.log`.
 
 **Double-clicking `install.sh` in Dolphin, Nautilus or Thunar** used to look
 like nothing happened: a file manager runs an executable script with no
@@ -80,34 +90,34 @@ leave your library and config alone. `make help` lists the same tasks for
 developers.
 
 You also need one player: `ffmpeg` (for `ffplay`), `mpv`, or `vlc` — the
-installers offer to fetch one. Check any time with `bgst doctor`.
+installers offer to fetch one. Check any time with `gravitone doctor`.
 
 ## Use
 
 ```sh
-bgst ui                                    # the control panel, in your browser
+gravitone ui                                    # the control panel, in your browser
 ```
 
-`bgst ui` starts the server *and* opens the page. Opening
-`bgsoundtrack/ui/index.html` from the folder by hand gives you a dead page —
+`gravitone ui` starts the server *and* opens the page. Opening
+`gravitone/ui/index.html` from the folder by hand gives you a dead page —
 it has no server to talk to, so no library, no file browser, no playback. The
 page says so if you land there.
 
 Only one UI runs at a time: start it again (or click the shortcut again) and
 it opens the browser at the one already running instead of fighting it for the
-port. `bgst ui --stop` ends it, `bgst ui --new` starts a second one anyway. If
+port. `gravitone ui --stop` ends it, `gravitone ui --new` starts a second one anyway. If
 port 8765 is taken by something else, it moves to the next free port and says
 so; with an explicit `--port` it reports the clash instead of moving.
 
 Or from the terminal:
 
 ```sh
-bgst init                                    # create the custom soundtrack folder
-bgst playlist new "Hollow Kingdom" --folder ~/Music/Nier --use
-bgst playlist new "Field Work" --folder ~/Sounds/recordings
-bgst folder add --ambient ~/Sounds/weather   # into the selected playlist
-bgst link ~/Music/Outer\ Wilds               # or link track by track
-bgst play
+gravitone init                                    # create the custom soundtrack folder
+gravitone playlist new "Hollow Kingdom" --folder ~/Music/Nier --use
+gravitone playlist new "Field Work" --folder ~/Sounds/recordings
+gravitone folder add --ambient ~/Sounds/weather   # into the selected playlist
+gravitone link ~/Music/Outer\ Wilds               # or link track by track
+gravitone play
 ```
 
 While playing in a terminal: `n` skips, `b` bans (skip and drop it from this
@@ -123,7 +133,7 @@ playlist), `q` quits.
 ## Speed and stability
 
 Everything that walks the disk happens on one background worker, never on a
-request. The folder index is written to `~/.config/bgsoundtrack/index.json`,
+request. The folder index is written to `~/.config/gravitone/index.json`,
 so a restart starts with answers rather than work, and the state the UI polls
 once a second is worked out only when something actually changes.
 
@@ -158,21 +168,21 @@ you clicked it from reconnects by itself.
 From a terminal:
 
 ```sh
-bgst ui --status      # is one running, where, and since when
-bgst ui --stop        # stop it
-bgst ui --new         # a second one anyway
+gravitone ui --status      # is one running, where, and since when
+gravitone ui --stop        # stop it
+gravitone ui --new         # a second one anyway
 ```
 
 ## The UI
 
-`bgst ui` serves a small control panel on `127.0.0.1:8765` and opens it. It is
+`gravitone ui` serves a small control panel on `127.0.0.1:8765` and opens it. It is
 plain HTML, CSS and JavaScript served by Python's own HTTP server — no
 Electron, no build step, no dependencies, nothing loaded from the internet.
 
 | | |
 | --- | --- |
-| ![The track table, sorted by album, with one row playing](docs/ui-library.png) | ![Settings: folders, export and import](docs/ui-settings.png) |
-| ![Adding: a whole folder, or just the files in it](docs/ui-add.png) | |
+| ![The track table, sorted by album, with one row playing](docs/ui-library.png) | ![Settings: gaps, levels, fade, playlists](docs/ui-settings.png) |
+| ![The file browser, with a folder opened where it stands](docs/ui-browse.png) | ![Adding: a whole folder, or just the files in it](docs/ui-add.png) |
 
 - **Top bar** — the playlist selector; switching it switches what plays. The
   button says what pressing it does — **Play**, then **Stop** — and a green
@@ -183,14 +193,21 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
   album underneath and the cover beside it) or how long the current gap runs,
   with history. Tags for the playing track are read on the spot, so this
   works whether or not you have opened the library table.
-- **Music / Ambient** — the two libraries; `✕` removes a link, never a file.
+- **Playlist / Ambient** — what this playlist plays, and what fills the gaps;
+  `✕` removes a link, never a file.
 - **Add** — *Choose a folder…* opens your desktop's own folder dialog (needs
-  Tk; `bgst doctor` says whether you have it). Otherwise browse from the
-  built-in file browser or paste a path — a web file picker hands over file
-  *contents*, never paths, and paths are what linking needs. Every folder row
-  offers **Add folder** (the whole folder joins this playlist, live) and
-  **Link files** (just the files in it now, as symlinks), plus *New playlist
-  from this folder…*.
+  Tk; `gravitone doctor` says whether you have it). Otherwise use the built-in
+  file browser, or paste a path — a web file picker hands over file
+  *contents*, never paths, and paths are what linking needs.
+
+  The browser behaves like a file manager rather than a list: **Back** (where
+  you were), **Up** (the folder above), **Home**, and a breadcrumb where every
+  step of the path is clickable. Each folder says what is in it — *5 tracks ·
+  2 folders* — and the chevron **opens it where it stands**, indenting its
+  contents underneath rather than taking you somewhere else, so a box of
+  albums can be read without walking in and out of it. Every folder row offers
+  **Add folder** (the whole folder joins this playlist, live) and **Link
+  files** (just the files in it now, as symlinks).
 - **Config** — gaps, levels, fade, shuffle, loop, your playlists (rename,
   delete, create), this playlist's folders and removed tracks, and
   export/import. Changes save immediately and take effect from the next gap;
@@ -206,7 +223,7 @@ so another page in your browser cannot drive your player or read your disk.
 Run it as a phone remote for the machine that's playing:
 
 ```sh
-bgst ui --host 0.0.0.0        # prints a LAN URL with the token
+gravitone ui --host 0.0.0.0        # prints a LAN URL with the token
 ```
 
 Anyone who has that link can control playback, so use it on networks you
@@ -217,21 +234,21 @@ trust.
 Already have two folders you think of as two playlists? Make them two:
 
 ```sh
-bgst playlist new "Hollow Kingdom" --folder ~/Music/hollow-kingdom --use
-bgst playlist new "Night Drive"    --folder ~/Music/night-drive
-bgst playlist list
-bgst playlist use "Night Drive"
+gravitone playlist new "Hollow Kingdom" --folder ~/Music/hollow-kingdom --use
+gravitone playlist new "Night Drive"    --folder ~/Music/night-drive
+gravitone playlist list
+gravitone playlist use "Night Drive"
 ```
 
 Or pick them from the selector in the top bar of the UI. A playlist owns:
 
 - its **folders**, played in place;
 - its own **links**, in `custom soundtrack/playlists/<id>/`;
-- its **removals** — take a track out with `✕` (or `bgst unlink NAME`) and it
+- its **removals** — take a track out with `✕` (or `gravitone unlink NAME`) and it
   stays out of *this* playlist, remembered across restarts. The same file
   keeps playing in any other playlist that points at it, and the file itself
   is never touched. Put it back from Config → *Removed from this playlist*,
-  or `bgst playlist restore --all`.
+  or `gravitone playlist restore --all`.
 
 Removing a **linked** track deletes that playlist's link instead — there is
 nothing to remember, and the other playlists keep theirs.
@@ -243,19 +260,19 @@ The playlist called **Library** is the plain `custom soundtrack/music` and
 `/ambient` folders, so an install from before playlists keeps working exactly
 as it did, folders and all.
 
-Playlists live in `~/.config/bgsoundtrack/playlists.json` — plain JSON, easy
+Playlists live in `~/.config/gravitone/playlists.json` — plain JSON, easy
 to read, back up, or edit by hand.
 
 ## Album art
 
 Covers come from **the picture inside the file**, and only from there — a
 `cover.jpg` lying in the folder is someone else's idea of what the record
-looks like, so it is ignored. Tag the files and bgst will find it.
+looks like, so it is ignored. Tag the files and gravitone will find it.
 
 Plenty of rips carry the picture on one track and not the rest, so a record
 is read across its first few files before it is called coverless. Both
 answers — the cover and the "there is none" — are written to
-`~/.config/bgsoundtrack/covers/index.json`, so a restart asks nothing again.
+`~/.config/gravitone/covers/index.json`, so a restart asks nothing again.
 
 **A record is a folder and an album tag, not a folder.** Keeping a whole
 game's music in one directory is normal, and one answer per directory meant
@@ -278,15 +295,15 @@ find nothing.
 reading the records nobody has asked about yet; **Look again** throws every
 answer away and re-reads the lot, for after you have added art to files. It
 reads the tags first, since they are what says where one record ends and the
-next begins. Art is cached in `~/.config/bgsoundtrack/covers/`, one file per
-record, since a record shares its cover, and `bgst doctor` says how many
+next begins. Art is cached in `~/.config/gravitone/covers/`, one file per
+record, since a record shares its cover, and `gravitone doctor` says how many
 records have art and how many are known not to.
 
 A cover is fetched **once per record, not once per track**, and served with
 an ETag and a week of cache headers. The token the page uses is kept in
-`~/.config/bgsoundtrack/token` rather than made up at every start, so a
+`~/.config/gravitone/token` rather than made up at every start, so a
 restart reuses the browser's cached art instead of re-fetching all of it;
-`bgst ui --new-token` throws the old one away when you want that.
+`gravitone ui --new-token` throws the old one away when you want that.
 
 Now shows the cover of what is playing at full size, next to the title,
 artist and album; the table shows a thumbnail per row.
@@ -303,15 +320,15 @@ or the title tag. Whichever it shows is what its header sorts by, so the
 column and the sort never disagree.
 
 ```sh
-bgst list --sort album        # name, title, artist, album, length
-bgst config sort_by=artist sort_desc=true
+gravitone list --sort album        # name, title, artist, album, length
+gravitone config sort_by=artist sort_desc=true
 ```
 
 Tags come from `ffprobe` (part of ffmpeg). Anything it cannot read falls back
 to the path — `Artist/Album/03 Title.flac` is a convention for a reason —
 and a guessed artist or album is shown in italics rather than passed off as a
 tag. Tags are read in the background and cached in
-`~/.config/bgsoundtrack/tags.json`, so a listing never waits on a probe: the
+`~/.config/gravitone/tags.json`, so a listing never waits on a probe: the
 table fills in the moment the read lands, and says how many are left while it
 works.
 
@@ -338,10 +355,10 @@ without the settings cards stretching into something silly.
 Two shapes, for two jobs:
 
 ```sh
-bgst export ~/bgst-library.json                    # a manifest: what is in each playlist
-bgst export ~/library.csv --format csv             # the same, flat, one row per track
-bgst export ~/share.zip --bundle --only "Night Drive"   # a zip with the audio inside
-bgst import ~/share.zip                            # adds playlists, never overwrites
+gravitone export ~/gravitone-library.json                    # a manifest: what is in each playlist
+gravitone export ~/library.csv --format csv             # the same, flat, one row per track
+gravitone export ~/share.zip --bundle --only "Night Drive"   # a zip with the audio inside
+gravitone import ~/share.zip                            # adds playlists, never overwrites
 ```
 
 A **manifest** is small, readable JSON listing each playlist's folders, links
@@ -363,15 +380,15 @@ isn't. Import always **adds**: a name that already exists becomes
 ## Listening together
 
 Two machines, the same music at the same moment, with **nothing between
-them** — no server, no connection, nothing to keep alive. bgst does not
+them** — no server, no connection, nothing to keep alive. gravitone does not
 stream and it does not follow: both ends work out the same evening from the
 same code.
 
 ```sh
-bgst party new --save /nas/music/bgst-party.json   # start one, write the file
-bgst party join 07PW-8BJW-01NA-NA8J-RN5W-W03R-0714-27G7
-bgst party status                                  # where it has got to
-bgst party leave
+gravitone party new --save /nas/music/gravitone-party.json   # start one, write the file
+gravitone party join 07PW-8BJW-01NA-NA8J-RN5W-W03R-0714-27G7
+gravitone party status                                  # where it has got to
+gravitone party leave
 ```
 
 or Party in the control panel: **Start a party** gives you a code to read
@@ -433,7 +450,7 @@ So the two libraries need nothing in common but the music:
 
 - **Bigger on their side?** Their extra tracks are simply not in the party.
 - **Smaller?** What they lack plays as **silence** for them, for exactly as
-  long as it plays for you, and bgst names what is missing so they can copy
+  long as it plays for you, and gravitone names what is missing so they can copy
   it over. Drop the files in mid-party and they join in at their next turn.
 - **Different folder layout, different file names, different tagger?** Fine.
 
@@ -450,7 +467,7 @@ is not on your machine, and a track you have banned simply plays as silence
 for you — the same rule as one you never had.
 
 Stopping and starting, restarting the server, or closing the laptop all
-leave the party alone: it is a timetable, and it is still running. `bgst
+leave the party alone: it is a timetable, and it is still running. `gravitone
 party leave` is the way out.
 
 ### Clocks
@@ -460,7 +477,7 @@ gap between tracks, so being a few hundred milliseconds out is not something
 anyone can hear. If a machine is known to be off, nudge it:
 
 ```sh
-bgst config party_offset=-0.5      # this machine's clock reads half a second late
+gravitone config party_offset=-0.5      # this machine's clock reads half a second late
 ```
 
 or the **Clock ±0.5s** buttons on the Party card.
@@ -488,14 +505,14 @@ at `~/Music/Soundtracks`, and every audio file under it plays, including
 whatever you add next week. A file reachable both ways is only played once.
 
 ```sh
-bgst folder add ~/Music/Soundtracks      # a music folder for this playlist
-bgst folder add --ambient ~/Sounds       # an ambience folder
-bgst folder list                         # with per-folder track counts
-bgst folder remove ~/Music/Soundtracks   # the folder itself is untouched
-bgst ui --pick                           # pick one from a system dialog
+gravitone folder add ~/Music/Soundtracks      # a music folder for this playlist
+gravitone folder add --ambient ~/Sounds       # an ambience folder
+gravitone folder list                         # with per-folder track counts
+gravitone folder remove ~/Music/Soundtracks   # the folder itself is untouched
+gravitone ui --pick                           # pick one from a system dialog
 ```
 
-(`bgst source …` still works — same command, older name.)
+(`gravitone source …` still works — same command, older name.)
 
 Because entries are plain symlinks, you can also manage the folder by hand —
 drag links in with your file manager, rename them to change sort order, delete
@@ -503,21 +520,21 @@ one to drop a track. The player ignores non-audio files and dangling links.
 
 | Command | |
 | --- | --- |
-| `bgst ui` | open the control panel (`--host 0.0.0.0` for a phone remote) |
-| `bgst play` | play in the terminal (`n` next, `q` quit) |
-| `bgst link PATH...` | symlink files/folders in (`--ambient`, `--no-recursive`, `--relative`) |
-| `bgst folder add\|remove\|list` | put whole folders in this playlist (`--ambient`) |
-| `bgst playlist list\|new\|use\|rename\|remove` | switch between sets of music |
-| `bgst playlist removed\|restore` | see and undo removals in this playlist |
-| `bgst export PATH [--bundle\|--format csv]` | write playlists out, with or without the audio |
-| `bgst import PATH` | read one back in as new playlists |
-| `bgst list --sort album` | order by name, title, artist, album or length |
-| `bgst play --hidden` | play without ever showing gap lengths |
-| `bgst ui --stop\|--new` | stop the running control panel, or start a second |
-| `bgst unlink NAME...` | remove entries (only ever deletes symlinks, never real files) |
-| `bgst list --targets` | show the library and what each link points at |
-| `bgst prune` | drop links whose target moved or was deleted |
-| `bgst doctor` | check folders, tracks and available players |
+| `gravitone ui` | open the control panel (`--host 0.0.0.0` for a phone remote) |
+| `gravitone play` | play in the terminal (`n` next, `q` quit) |
+| `gravitone link PATH...` | symlink files/folders in (`--ambient`, `--no-recursive`, `--relative`) |
+| `gravitone folder add\|remove\|list` | put whole folders in this playlist (`--ambient`) |
+| `gravitone playlist list\|new\|use\|rename\|remove` | switch between sets of music |
+| `gravitone playlist removed\|restore` | see and undo removals in this playlist |
+| `gravitone export PATH [--bundle\|--format csv]` | write playlists out, with or without the audio |
+| `gravitone import PATH` | read one back in as new playlists |
+| `gravitone list --sort album` | order by name, title, artist, album or length |
+| `gravitone play --hidden` | play without ever showing gap lengths |
+| `gravitone ui --stop\|--new` | stop the running control panel, or start a second |
+| `gravitone unlink NAME...` | remove entries (only ever deletes symlinks, never real files) |
+| `gravitone list --targets` | show the library and what each link points at |
+| `gravitone prune` | drop links whose target moved or was deleted |
+| `gravitone doctor` | check folders, tracks and available players |
 
 Any command takes `--playlist NAME` to act on a playlist without selecting it.
 
@@ -525,7 +542,7 @@ Any command takes `--playlist NAME` to act on a playlist without selecting it.
 your music move together (e.g. both on one external drive).
 
 On Windows, symlinks need Developer Mode (Settings → System → For developers).
-Without it `bgst` falls back to hard links, which also cost no extra space but
+Without it `gravitone` falls back to hard links, which also cost no extra space but
 cannot cross drives.
 
 ## Remove
@@ -574,7 +591,7 @@ The gap sliders reach an hour on a curved scale, so the first third of the
 travel still covers 0–60 s. Type an exact value into the box beside them
 instead if you prefer: `90`, `90s`, `3m`, `2m30`, `1:30` all work.
 
-**Hidden mode** (`hide_gaps`, or `bgst play --hidden`) withholds gap lengths
+**Hidden mode** (`hide_gaps`, or `gravitone play --hidden`) withholds gap lengths
 *server-side* — the browser is never told how long the quiet is or how much is
 left, so there is no countdown to watch and nothing to peek at in the network
 tab. Songs still show their progress.
@@ -588,16 +605,16 @@ gap.
 Change them for good, or just for one session:
 
 ```sh
-bgst config gap_min=30 gap_max=120 ambient_chance=0.8   # saved
-bgst config                                             # show everything
-bgst play --gap-min 60 --gap-max 180 --no-ambient       # this run only
+gravitone config gap_min=30 gap_max=120 ambient_chance=0.8   # saved
+gravitone config                                             # show everything
+gravitone play --gap-min 60 --gap-max 180 --no-ambient       # this run only
 ```
 
 Other `play` flags: `--volume`, `--ambient-volume`, `--no-shuffle`, `--no-loop`,
 `--player ffplay|mpv|afplay|vlc`, `--seed N` (reproducible shuffle and gaps).
 
-Settings live in `~/.config/bgsoundtrack/config.json`. `BGSOUNDTRACK_ROOT` and
-`BGSOUNDTRACK_CONFIG` override the paths, and `--root` / `--config` override
+Settings live in `~/.config/gravitone/config.json`. `GRAVITONE_ROOT` and
+`GRAVITONE_CONFIG` override the paths, and `--root` / `--config` override
 them per command — handy for a separate library per game.
 
 ## Cross-platform
@@ -632,8 +649,8 @@ It is done two different ways, because there are two different endings:
   skip still has to feel like a skip.
 
 ```sh
-bgst config fade=2.5      # a long, slow swell
-bgst config fade=0        # straight in, straight out
+gravitone config fade=2.5      # a long, slow swell
+gravitone config fade=0        # straight in, straight out
 ```
 
 ## Volume
@@ -645,8 +662,8 @@ reads `-volume` once at startup and offers no way to change it afterwards —
 which is why, before this, moving the app slider mid-song did nothing on
 Fedora/Plasma while the desktop's own mixer worked fine.
 
-Players are also tagged as `bgst` (`PULSE_PROP_application.name`), so your
-desktop's volume mixer shows one **bgst** entry to ride rather than a new
+Players are also tagged as `gravitone` (`PULSE_PROP_application.name`), so your
+desktop's volume mixer shows one **gravitone** entry to ride rather than a new
 `ffplay` appearing for every song.
 
 If `pactl` is missing (a pure-ALSA box, macOS, Windows), a volume change
@@ -657,22 +674,22 @@ applies from the next track and the UI says so.
 Reinstalling replaces the files on disk, but a UI that is **already running**
 keeps the old code in memory while serving the new page from disk — so the
 page asks for things the server has never heard of (`unknown setting
-'sort_desc'`), or columns come up empty. bgst now notices:
+'sort_desc'`), or columns come up empty. gravitone now notices:
 
 - the page shows a banner saying it was updated and what to run;
-- `bgst ui` refuses to quietly hand you the stale one: in a terminal it offers
+- `gravitone ui` refuses to quietly hand you the stale one: in a terminal it offers
   to restart it, and from a shortcut it says so in a dialog;
-- `bgst doctor` reports it too.
+- `gravitone doctor` reports it too.
 
 The fix is always the same:
 
 ```sh
-bgst ui --stop && bgst ui
+gravitone ui --stop && gravitone ui
 ```
 
 ## When the shortcut seems to do nothing
 
-A desktop shortcut runs with no terminal, so anything printed is lost. bgst
+A desktop shortcut runs with no terminal, so anything printed is lost. gravitone
 now puts failures on screen instead (kdialog, zenity, xmessage or a Tk dialog,
 whichever exists), including "running, but no browser opened — go to
 `http://…`". The three things that used to fail silently:
@@ -682,11 +699,11 @@ whichever exists), including "running, but no browser opened — go to
 | Port 8765 already taken | moves to the next free port, or says so with `--port` |
 | A UI already running | opens the browser at that one; `--stop` to end it |
 | Upgraded while running | banner in the page, offer to restart from the terminal |
-| `bgst: command not found` | `~/.local/bin` is not on PATH — see Install, or use the full path |
+| `gravitone: command not found` | `~/.local/bin` is not on PATH — see Install, or use the full path |
 | Started from the installer, terminal closed | now launched detached, survives it |
 
 Its log, when started from the installer or a shortcut, is
-`~/.local/state/bgst/ui.log`.
+`~/.local/state/gravitone/ui.log`.
 
 ## Tests
 
@@ -701,6 +718,19 @@ no chromium to drive.
 
 No test needs an audio device: playback is faked and the clock is injected,
 so the suite runs in about a second anywhere.
+
+## Credits
+
+The icons are [Lucide](https://lucide.dev) (ISC), inlined rather than loaded
+from a CDN so the page works with no network at all. The Gravitone mark was
+drawn for this project. Full notices in [docs/CREDITS.md](docs/CREDITS.md).
+
+## Upgrading from bgst
+
+It used to be called `bgst`. On first run the old `~/.config/bgsoundtrack`
+folder is moved to `~/.config/gravitone` — one rename, nothing copied — so
+your playlists, tags, cover art and party rosters come with you. The old
+`bgst` command is gone; it is `gravitone` now, or `grav`.
 
 ## License
 

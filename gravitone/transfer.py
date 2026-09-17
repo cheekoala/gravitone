@@ -23,11 +23,11 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from bgsoundtrack import library, playlists
-from bgsoundtrack.config import Config
+from gravitone import library, playlists
+from gravitone.config import Config
 
 FORMAT = 1
-MANIFEST_NAME = "bgst.json"
+MANIFEST_NAME = "gravitone.json"
 AUDIO_DIR = "audio"
 
 
@@ -61,7 +61,7 @@ def manifest(config: Config, store: playlists.Store, names: list | None = None) 
     """Everything needed to rebuild these playlists, minus the audio."""
     chosen = _chosen(store, names)
     out = {
-        "bgst": FORMAT,
+        "gravitone": FORMAT,
         "exported": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "settings": {
             key: value
@@ -247,10 +247,10 @@ def read_manifest(path: Path) -> dict:
     except (OSError, KeyError, json.JSONDecodeError) as exc:
         raise TransferError(f"could not read {path}: {exc}") from exc
     if not isinstance(data, dict) or "playlists" not in data:
-        raise TransferError(f"{path} is not a bgst export")
-    if int(data.get("bgst", 0)) > FORMAT:
+        raise TransferError(f"{path} is not a gravitone export")
+    if int(data.get("gravitone", 0)) > FORMAT:
         raise TransferError(
-            f"{path} was written by a newer bgst (format {data['bgst']})"
+            f"{path} was written by a newer gravitone (format {data['gravitone']})"
         )
     return data
 

@@ -1,4 +1,4 @@
-"""Command line interface: bgst <command>."""
+"""Command line interface: gravitone <command>."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import threading
 import time
 from pathlib import Path
 
-from bgsoundtrack import (
+from gravitone import (
     __version__,
     config as config_module,
     engine,
@@ -21,7 +21,7 @@ from bgsoundtrack import (
     playlists,
     transfer,
 )
-from bgsoundtrack.config import Config
+from gravitone.config import Config
 
 
 def _fmt(seconds: float) -> str:
@@ -62,8 +62,8 @@ def cmd_init(args) -> int:
         print(f"  created {path}")
     if not created:
         print("  already set up")
-    print("\nAdd music with:   bgst link ~/Music/some-album")
-    print("Add ambience with: bgst link --ambient ~/Sounds/rain.ogg")
+    print("\nAdd music with:   gravitone link ~/Music/some-album")
+    print("Add ambience with: gravitone link --ambient ~/Sounds/rain.ogg")
     return 0
 
 
@@ -101,7 +101,7 @@ def cmd_unlink(args) -> int:
 
 
 def _party_session(args):
-    from bgsoundtrack import service
+    from gravitone import service
 
     config, store, _ = _load(args)
     return service.Session(config, _config_path(args), store=store)
@@ -159,7 +159,7 @@ def cmd_party(args) -> int:
         else:
             print(
                 "if their library is not exactly this one, send them the party "
-                "file too:\n    bgst party save <path>"
+                "file too:\n    gravitone party save <path>"
             )
         return 0
 
@@ -175,7 +175,7 @@ def cmd_party(args) -> int:
         print(f"joined. playing along in {session.playlist.name}:")
         _show_party(state)
         print()
-        print("start playing with 'bgst play' - it will drop you in mid-track.")
+        print("start playing with 'gravitone play' - it will drop you in mid-track.")
         return 0
 
     if args.action == "save":
@@ -197,7 +197,7 @@ def cmd_party(args) -> int:
 
     state = session.party_state()
     if state is None:
-        print("not in a party. 'bgst party new' starts one.")
+        print("not in a party. 'gravitone party new' starts one.")
         return 0
     _show_party(state)
     return 0
@@ -371,7 +371,7 @@ def cmd_list(args) -> int:
     print(f"playlist: {playlist.name}\n")
     sort = getattr(args, "sort", None) or config.sort_by
     if sort != "name":
-        from bgsoundtrack import tags
+        from gravitone import tags
 
         reader = tags.Reader()
         for section in sections:
@@ -454,18 +454,18 @@ def cmd_doctor(args) -> int:
         for folder in playlist.sources(section):
             state = "ok" if folder.is_dir() else "MISSING"
             print(f"{section[:7]} folder  {folder} [{state}]")
-    from bgsoundtrack import picker
+    from gravitone import picker
 
     found = player.available()
     print(f"players found   {', '.join(found) if found else 'NONE'}")
     import shutil
 
-    from bgsoundtrack import instance
+    from gravitone import instance
 
     probe = shutil.which("ffprobe")
     print(f"tags & lengths  {'ffprobe' if probe else 'NO ffprobe - no titles or lengths'}")
 
-    from bgsoundtrack import art as art_module
+    from gravitone import art as art_module
 
     covers = art_module.Art(art_module.cache_dir(_config_path(args)))
     remembered = covers.remembered()
@@ -486,7 +486,7 @@ def cmd_doctor(args) -> int:
 
     if instance.process_is_stale():
         print(
-            "update pending   bgst was installed again after this command's "
+            "update pending   gravitone was installed again after this command's "
             "version was loaded"
         )
     chooser = picker.available()
@@ -558,7 +558,7 @@ def _key_listener(controls: engine.Controls, on_ban=None) -> None:
 
 
 def cmd_ui(args) -> int:
-    from bgsoundtrack import webui
+    from gravitone import webui
 
     if args.pick:
         return _pick_source(args)
@@ -579,12 +579,12 @@ def cmd_ui(args) -> int:
 
 
 def _pick_source(args) -> int:
-    from bgsoundtrack import picker
+    from gravitone import picker
 
-    result = picker.pick("folder", "Choose a music folder for bgst")
+    result = picker.pick("folder", "Choose a music folder for gravitone")
     if not result.available:
         print(f"no system file chooser here ({result.reason})", file=sys.stderr)
-        print("use 'bgst folder add PATH' instead", file=sys.stderr)
+        print("use 'gravitone folder add PATH' instead", file=sys.stderr)
         return 1
     if not result.paths:
         print("nothing picked")
@@ -611,7 +611,7 @@ def cmd_play(args) -> int:
 
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
 
-    from bgsoundtrack import tags as tag_reader
+    from gravitone import tags as tag_reader
 
     reader = tag_reader.Reader(tag_reader.cache_path(_config_path(args)))
     # In a party the engine plays a timetable somebody else can work out too.
@@ -703,10 +703,13 @@ def cmd_play(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="bgst",
-        description="Play a custom game soundtrack with ambient or silent gaps between songs.",
+        prog="gravitone",
+        description=(
+            "Gravitone: your own soundtrack for any game, with silence or "
+            "weather between the songs."
+        ),
     )
-    parser.add_argument("--version", action="version", version=f"bgst {__version__}")
+    parser.add_argument("--version", action="version", version=f"gravitone {__version__}")
     parser.add_argument("--root", help="custom soundtrack folder (overrides config)")
     parser.add_argument("--config", help="path to the config file")
     parser.add_argument(
@@ -915,7 +918,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     except BrokenPipeError:
-        # `bgst list | head` closes the pipe on us; exit quietly like `ls` does.
+        # `gravitone list | head` closes the pipe on us; exit quietly like `ls` does.
         try:
             sys.stdout.close()
         finally:

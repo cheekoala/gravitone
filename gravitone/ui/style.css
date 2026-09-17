@@ -1,4 +1,4 @@
-/* bgst UI - dark, compact, no dependencies. */
+/* gravitone UI - dark, compact, no dependencies. */
 :root {
   --bg: #0a0a0b;
   --panel: #111113;
@@ -47,10 +47,7 @@ h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
   background: linear-gradient(180deg, #121214, #0e0e10);
 }
 .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.brand-dot {
-  width: 18px; height: 18px; border-radius: 6px; flex: none;
-  background: linear-gradient(145deg, var(--accent), var(--select));
-}
+.brand-mark { width: 22px; height: 22px; flex: none; }
 .brand-name { font-weight: 650; letter-spacing: -0.01em; }
 .playlist-pick { position: relative; display: inline-flex; align-items: center; flex: none; }
 .playlist-pick select {
@@ -337,7 +334,56 @@ table.tracks tbody tr:hover .origin, table.tracks tbody tr.playing .origin { opa
   padding: 5px 11px; font-size: 12.5px; color: var(--muted);
 }
 .chip:hover { color: var(--text); border-color: #33333a; }
-.crumb { font: 11px/1.4 var(--mono); color: var(--muted); word-break: break-all; }
+/* -- the file browser ---------------------------------------------- */
+.browser-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.browser-nav { display: flex; gap: 6px; flex: none; }
+.browser-nav .ghost { gap: 5px; }
+.browser-nav .icon { width: 15px; height: 15px; }
+
+.crumb {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 1px;
+  font: 11px/1.6 var(--mono); color: var(--muted);
+}
+.crumb-step {
+  background: none; border: none; border-radius: 6px;
+  padding: 2px 5px; font: inherit; color: var(--muted);
+}
+.crumb-step:hover { color: var(--text); background: var(--panel-2); }
+.crumb-step.here { color: var(--text); font-weight: 600; }
+.crumb .sep { color: var(--faint); }
+
+/* Rows step right as the tree goes down, so a branch reads as a branch. */
+.browser li { margin-left: calc(var(--depth, 0) * 26px); }
+.browser li.branch-of {
+  background: var(--panel-2);
+  border-color: var(--line-soft);
+  position: relative;
+}
+/* A guide down the left of everything that belongs to the folder above. */
+.browser li.branch-of::before {
+  content: "";
+  position: absolute;
+  left: -14px; top: -4px; bottom: -4px;
+  border-left: 1px solid var(--line);
+}
+.browser li.here { border-color: var(--accent-dim); background: rgba(20,184,143,.06); }
+.browser .twisty {
+  flex: none; background: none; border: none; padding: 2px;
+  color: var(--faint); border-radius: 6px; display: flex;
+}
+.browser .twisty:hover:not(:disabled) { color: var(--text); background: var(--panel-2); }
+.browser .twisty:disabled { opacity: .25; cursor: default; }
+.browser .twisty .icon { width: 16px; height: 16px; transition: transform .12s ease; }
+.browser li.open > .twisty .icon { transform: rotate(90deg); }
+.browser li.loading > .twisty { animation: pulse 1s infinite; }
+.browser .t-name { display: flex; align-items: center; gap: 8px; }
+.browser .t-name .icon { width: 16px; height: 16px; flex: none; }
+.browser .folder-icon { color: var(--select); opacity: .9; }
+.browser .track-icon { color: var(--faint); }
+.browser li.file .t-name span { color: var(--muted); }
+.browser li.empty.branch { color: var(--faint); font-style: italic; }
 .browser li { cursor: pointer; }
 .browser li:hover { border-color: #33333a; background: var(--panel-2); }
 .browser .badge {

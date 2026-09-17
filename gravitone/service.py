@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bgsoundtrack import (
+from gravitone import (
     __version__,
     art as art_module,
     config as config_module,
@@ -28,7 +28,7 @@ from bgsoundtrack import (
     tags,
     transfer,
 )
-from bgsoundtrack.config import Config
+from gravitone.config import Config
 
 
 @dataclass
@@ -299,7 +299,7 @@ class Session:
         self._started = time.time()
         library.configure_index(self._index_path())
 
-        self._tag_thread = threading.Thread(target=work, daemon=True, name="bgst-tags")
+        self._tag_thread = threading.Thread(target=work, daemon=True, name="gravitone-tags")
         self._tag_thread.start()
 
     @property
@@ -334,7 +334,7 @@ class Session:
             self._controls = controls
             self._runner = runner
             self._thread = threading.Thread(
-                target=self._run, args=(runner,), daemon=True, name="bgst-engine"
+                target=self._run, args=(runner,), daemon=True, name="gravitone-engine"
             )
             self._thread.start()
 
@@ -650,7 +650,7 @@ class Session:
         # counter: the counter reaches zero a moment before the answers are
         # written down.
         self._art_thread = threading.Thread(
-            target=work, daemon=True, name="bgst-art-scan"
+            target=work, daemon=True, name="gravitone-art-scan"
         )
         self._art_thread.start()
         return len(wanted)
