@@ -574,18 +574,26 @@ def test_a_cover_can_be_asked_for_by_the_link_or_the_file(server, tmp_path):
 
 
 def test_history_catches_up_when_tags_arrive(server, tmp_path):
-    from gravitone import engine, tags
+    from gravitone import engine, library, tags
 
-    httpd, session, *_ = server
+    httpd, session, config, _ = server
     song = tmp_path / "album" / "01 Song.mp3"
     song.parent.mkdir(parents=True)
     song.write_bytes(b"\0")
+    library.link(config, [song], playlist=session.playlist)
+    library.invalidate_cache()
 
     session._on_event(engine.Event("track", path=song))
-    assert request(httpd, "/api/state")["history"] == ["01 Song.mp3"]
+    played = request(httpd, "/api/state")["history"]
+    assert [row["label"] for row in played] == ["01 Song.mp3"]
+    # Each line carries what it would take to act on it.
+    assert played[0]["name"] == "01 Song.mp3"
+    assert played[0]["target"] == str(song)
+    assert played[0]["removed"] is False
 
     session._tags.store(song, tags.Tags(title="Song", artist="Artist"))
-    assert request(httpd, "/api/state")["history"] == ["Song — Artist"]
+    played = request(httpd, "/api/state")["history"]
+    assert [row["label"] for row in played] == ["Song — Artist"]
 
 
 # -- parties -------------------------------------------------------------
@@ -912,3 +920,65 @@ def test_a_hidden_folder_is_not_counted_as_contents(server, tmp_path):
     listing = request(httpd, f"/api/browse?path={urllib.parse.quote(str(tmp_path))}")
     assert listing["dirs"][0]["folders"] == 0
     assert listing["dirs"][0]["audio"] == 1
+
+
+def test_the_recently_played_list_says_what_is_no_longer_in_the_playlist(server, tmp_path):
+    """Removed, unlinked, or never here: all the same from where you stand."""
+    from gravitone import engine, library
+
+    httpd, session, config, _ = server
+    song = tmp_path / "album" / "01 Song.mp3"
+    song.parent.mkdir(parents=True)
+    song.write_bytes(b"\0")
+    library.link(config, [song], playlist=session.playlist)
+    library.invalidate_cache()
+    session._on_event(engine.Event("track", path=config.music_dir / "01 Song.mp3"))
+    assert request(httpd, "/api/state")["history"][0]["removed"] is False
+
+    request(httpd, "/api/remove-track", {"name": "01 Song.mp3"})
+    row = request(httpd, "/api/state")["history"][0]
+    assert row["removed"] is True
+
+    request(httpd, "/api/restore-track", {"target": row["target"]})
+    assert request(httpd, "/api/state")["history"][0]["removed"] is False
+
+
+def test_mirroring_lays_a_folder_playlist_out_as_links(server, tmp_path):
+    """A folder added whole plays in place and leaves nothing on disk, which
+    is tidy until you go looking for the playlist in a file manager."""
+    from gravitone import library
+
+    httpd, session, config, _ = server
+    album = tmp_path / "album"
+    album.mkdir()
+    for index in range(4):
+        (album / f"{index:02d}.mp3").write_bytes(b"\0")
+    session.add_source(str(album), "music")
+    library.invalidate_cache()
+
+    where = Path(session.links_dir())
+    assert len(session.library("music")["tracks"]) == 4
+    assert list(where.iterdir()) == []            # nothing to see in Dolphin
+
+    result = request(httpd, "/api/mirror", {})["result"]
+    assert result["linked"] == 4
+    assert result["where"] == str(where)
+    on_disk = sorted(p.name for p in where.iterdir())
+    assert on_disk == ["00.mp3", "01.mp3", "02.mp3", "03.mp3"]
+    assert all((where / name).is_symlink() for name in on_disk)
+
+    # ...and the playlist did not double up.
+    library.invalidate_cache()
+    assert len(session.library("music")["tracks"]) == 4
+    assert request(httpd, "/api/mirror", {})["result"]["linked"] == 0
+
+
+def test_the_state_says_where_this_playlist_lives(server):
+    httpd, session, config, _ = server
+    assert request(httpd, "/api/state")["links"] == str(config.music_dir)
+
+    session.add_playlist("Survival")
+    session.select_playlist("survival")
+    links = Path(request(httpd, "/api/state")["links"])
+    assert links.parent.name == "survival"        # named, not an opaque id
+    assert links.name == "music"

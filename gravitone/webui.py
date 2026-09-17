@@ -372,6 +372,9 @@ class Handler(BaseHTTPRequestHandler):
                 session.forget_covers() if body.get("again") else session.find_covers()
             )
             return {**session.snapshot(), "result": result}
+        elif route == "mirror":
+            result = session.mirror()
+            return {**session.snapshot(), "result": result}
         elif route == "party":
             action = body.get("action", "")
             # The result is worked out before the snapshot, or the snapshot

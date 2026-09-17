@@ -132,6 +132,18 @@ playlist), `q` quits.
 
 ## Speed and stability
 
+The page is polled once a second, but the **playing clock does not wait for
+it**: each answer is a fix, and between fixes the progress bar and the times
+run on their own at one second per second, snapping back only when the server
+says something different. A late answer no longer shows up as the bar sitting
+still and then lurching four seconds.
+
+Skip and Remove both fade the sound out before stopping it, so the button
+keeps its spinner until the music has actually moved on rather than until the
+request returns — and while it waits, the page asks more often than once a
+second so it catches the change as it happens.
+
+
 Everything that walks the disk happens on one background worker, never on a
 request. The folder index is written to `~/.config/gravitone/index.json`,
 so a restart starts with answers rather than work, and the state the UI polls
@@ -493,8 +505,12 @@ train tunnel.
 
 ```
 custom soundtrack/
-├── music/      symlinks -> your songs, wherever they live
-└── ambient/    symlinks -> your ambience
+├── music/                       the Library playlist's symlinks
+├── ambient/                     its ambience
+└── playlists/
+    └── survival-soundtrack/     every other playlist gets its own pair,
+        ├── music/               named after the playlist
+        └── ambient/
 
 plus any folders you added, played where they stand
 ```
@@ -503,6 +519,26 @@ plus any folders you added, played where they stand
 the original folder later. **Folders** are the low-effort option: point a playlist
 at `~/Music/Soundtracks`, and every audio file under it plays, including
 whatever you add next week. A file reachable both ways is only played once.
+
+### The folder is the playlist
+
+A linked track is a real symlink, so the playlist is browsable in Dolphin,
+Finder or Explorer as well as in here — sort it, open a track, drag one out.
+Two things surprise people:
+
+- **A named playlist does not live in `custom soundtrack/music`.** That
+  folder belongs to the *Library* playlist. Everything else is under
+  `playlists/<name>/`. Config → *This playlist on disk* shows the exact path,
+  with a button to copy it.
+- **A folder added whole links nothing.** It plays in place by design — that
+  is the whole point of it — so its folder on disk is empty. Press
+  **Mirror as links** (Config → *This playlist on disk*) and every track the
+  playlist plays gets a symlink of its own, without copying a byte or
+  changing what plays. Running it twice does nothing the second time.
+
+```sh
+gravitone playlist list      # every playlist, with what it holds
+```
 
 ```sh
 gravitone folder add ~/Music/Soundtracks      # a music folder for this playlist

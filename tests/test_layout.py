@@ -572,3 +572,141 @@ def test_the_path_is_offered_a_step_at_a_time(served_tree):
             )
         finally:
             browser.close()
+
+
+@pytest.fixture
+def served_playing(tmp_path):
+    """A server that reports something playing, for the Now panel."""
+    import time as clock
+
+    from gravitone import engine, player, tags
+
+    album = tmp_path / "music"
+    album.mkdir()
+    for index in range(3):
+        (album / f"{index:02d} Track.mp3").write_bytes(b"\0")
+
+    config = Config(root=str(tmp_path / "custom soundtrack"))
+    store = playlists.Store()
+    library.init(config, store.current())
+    library.link(config, [album], playlist=store.current())
+    library.invalidate_cache()
+    session = Session(config, tmp_path / "config.json", store=store)
+    for path in album.iterdir():
+        session._tags.store(
+            path, tags.Tags(title=path.stem, artist="Someone", duration=240.0)
+        )
+
+    def hold(self, on_event=None):
+        while not self.controls.stopping:
+            clock.sleep(0.02)
+
+    original_run, original_detect = engine.Engine.run, player.detect
+    engine.Engine.run = hold
+    player.detect = lambda *a, **k: player.Backend("test", "/bin/true")
+    session.start()
+    for name in ("00 Track.mp3", "01 Track.mp3"):
+        session._on_event(engine.Event("track", path=config.music_dir / name))
+    session._now.duration = 240.0
+
+    httpd = webui.serve(session, host="127.0.0.1", port=0, open_browser=False)
+    yield f"http://127.0.0.1:{httpd.server_port}/#{httpd.token}", session
+    engine.Engine.run, player.detect = original_run, original_detect
+    session.stop()
+    httpd.shutdown()
+
+
+def test_the_playing_clock_runs_between_polls(served_playing):
+    """The server is asked once a second and does not always answer on the
+    beat; the bar should not wait for it."""
+    url, _ = served_playing
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(url)
+            page.wait_for_function(
+                "() => document.getElementById('now-elapsed').textContent !== '0:00'",
+                timeout=15000,
+            )
+            # Hold every answer on the wire for four seconds. The clock has
+            # nothing to go on but itself.
+            page.evaluate(
+                """() => {
+                    const real = window.fetch;
+                    window.fetch = (url, opts) => real(url, opts).then(async (res) => {
+                        if (String(url).indexOf('/api/state') !== -1) {
+                            await new Promise((go) => setTimeout(go, 4000));
+                        }
+                        return res;
+                    });
+                }"""
+            )
+            page.wait_for_timeout(300)
+            widths = []
+            for _ in range(8):
+                widths.append(page.evaluate(
+                    "parseFloat(document.getElementById('now-progress').style.width)"))
+                page.wait_for_timeout(300)
+
+            assert widths == sorted(widths), widths
+            assert widths[-1] > widths[0], "the bar stopped when the polls did"
+            # Smoothly, rather than in one lurch when an answer lands.
+            steps = [b - a for a, b in zip(widths, widths[1:])]
+            assert all(step < 1.0 for step in steps), steps
+        finally:
+            browser.close()
+
+
+def test_the_record_turns_while_it_plays(served_playing):
+    url, session = served_playing
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(url)
+            def turning(name):
+                return (
+                    "() => getComputedStyle(document.querySelector("
+                    "'[data-panel=\"now\"] .icon')).animationName === '%s'" % name
+                )
+
+            page.wait_for_function(turning("spin"), timeout=15000)
+            session.stop()
+            page.wait_for_function(turning("none"), timeout=15000)
+        finally:
+            browser.close()
+
+
+def test_a_played_track_can_be_taken_out_and_put_back(served_playing):
+    url, session = served_playing
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(url)
+            page.wait_for_selector("#history li.played", timeout=15000)
+            row = page.locator("#history li").first
+            assert "gone" not in (row.get_attribute("class") or "")
+
+            row.hover()
+            row.locator(".played-act").click()
+            page.wait_for_function(
+                """() => document.querySelector('#history li')
+                        .className.includes('gone')""",
+                timeout=15000,
+            )
+            struck = page.evaluate(
+                """() => getComputedStyle(document.querySelector(
+                    '#history li .played-name')).textDecorationLine"""
+            )
+            assert struck == "line-through"
+
+            page.locator("#history li").first.locator(".played-act").click()
+            page.wait_for_function(
+                """() => !document.querySelector('#history li')
+                         .className.includes('gone')""",
+                timeout=15000,
+            )
+        finally:
+            browser.close()
