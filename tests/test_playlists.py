@@ -282,3 +282,24 @@ def test_engine_rebuilds_its_queue_when_the_playlist_changes(config, tmp_path, m
 
     assert played[0].startswith("a")     # started in One
     assert played[1] == "b1.mp3"         # switched without waiting for a pass end
+
+
+def test_windows_is_told_why_linking_failed(config, tmp_path, monkeypatch):
+    """"A required privilege is not held by the client" helps nobody."""
+    album = make_album(tmp_path / "album", "a.mp3")
+    store = playlists.Store()
+    library.init(config, store.current())
+
+    def refuse(*args, **kwargs):
+        raise OSError("a required privilege is not held by the client")
+
+    monkeypatch.setattr(library, "_on_windows", lambda: True)
+    monkeypatch.setattr(library.Path, "symlink_to", refuse)
+    monkeypatch.setattr(library.os, "link", refuse)
+
+    result = library.link(config, [album / "a.mp3"], playlist=store.current())
+    assert result.linked == []
+    why = result.skipped[0][1]
+    assert "Developer Mode" in why
+    assert "cannot cross drives" in why
+    assert "Adding the folder instead" in why
