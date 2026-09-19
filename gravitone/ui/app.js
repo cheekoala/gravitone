@@ -227,6 +227,48 @@
     });
   }
 
+  // What to do next, where the button that needs it is. The server knows
+  // perfectly well why nothing played; until now it only said so at the
+  // bottom of the settings panel, which is no use to somebody who has just
+  // installed this and pressed the big green button.
+  function renderNotice(next) {
+    const counts = next.counts || {};
+    const players = next.players || [];
+    let lead = "";
+    let detail = "";
+    let action = null;
+    let bad = false;
+
+    if (!players.length) {
+      bad = true;
+      lead = "No audio player found";
+      detail = "Gravitone plays through ffmpeg, mpv or VLC. Install one of "
+        + "them and press Play again — ffmpeg is the usual choice.";
+    } else if (!counts.music) {
+      lead = "No music yet";
+      detail = "Point Gravitone at a folder of music and it will play it, "
+        + "shuffled, with quiet between the songs. Nothing is copied or moved.";
+      action = { label: "Add music", go: () => showPanel("add") };
+    } else if (next.error) {
+      bad = true;
+      lead = "That did not work";
+      detail = next.error;
+    }
+
+    const notice = $("notice");
+    notice.hidden = !lead;
+    notice.classList.toggle("bad", bad);
+    if (!lead) return;
+    $("notice-lead").textContent = lead;
+    $("notice-detail").textContent = detail;
+    const button = $("notice-do");
+    button.hidden = !action;
+    if (action) {
+      button.textContent = action.label;
+      button.onclick = action.go;
+    }
+  }
+
   function toast(message, bad, stay) {
     const node = $("toast");
     node.textContent = message;
@@ -393,6 +435,7 @@
     }
     renderParty(next);
     renderAudioChoices(next);
+    renderNotice(next);
 
     const nowPanel = $("panel-now");
     // A track nobody here has is quiet in this room, so it reads as a gap -
