@@ -35,28 +35,39 @@ coming off it.
 
 The command is `gravitone`, and `grav` for short.
 
-![The gravitone control panel, with Remove armed and its confirm dropped below](docs/ui-now.png)
+![Gravitone playing a track, the quiet between songs, and the next one starting](docs/demo.gif)
+
+*A song, the gap after it, and the next one — the clock runs whether or not the
+server answers on the beat.*
 
 ## Install
 
-One script per platform. Each installs into a private virtualenv (or pipx if
-you have it), puts `gravitone` on your PATH, and offers to install an audio player
-if you have none.
+Nothing to build, nothing to clone, no Python knowledge required.
 
-**Linux, macOS, *BSD, WSL**
+1. Download **`gravitone-<version>.zip`** from the
+   [latest release](https://github.com/cheekoala/custom_bg_game_soundtrack_player/releases/latest).
+2. Unpack it anywhere.
+3. Run the installer for your machine:
+
+| | |
+| --- | --- |
+| **Linux, macOS, *BSD, WSL** | `./install.sh` — or double-click it; it opens a terminal by itself |
+| **Windows** | right-click `install.ps1` → *Run with PowerShell* |
+
+Each installs into a private virtualenv, puts `gravitone` (and `grav`) on your
+PATH, offers to install an audio player if you have none, and checks
+afterwards that the command it claims to have installed really starts. It ends
+with a short report of what it found.
+
+Answer nothing and take every default with `./install.sh --yes` /
+`.\install.ps1 -Yes` — useful over SSH or in a script.
+
+**From a git checkout**, if you'd rather:
 
 ```sh
 git clone https://github.com/cheekoala/custom_bg_game_soundtrack_player
 cd custom_bg_game_soundtrack_player
 ./install.sh                 # add --with-player to install ffmpeg without asking
-```
-
-**Windows** (PowerShell)
-
-```powershell
-git clone https://github.com/cheekoala/custom_bg_game_soundtrack_player
-cd custom_bg_game_soundtrack_player
-powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 **Any platform, by hand**
@@ -71,7 +82,8 @@ and to put `~/.local/bin` on your PATH if it isn't already (`--path` /
 `--no-path`) — otherwise `gravitone` installs fine and then `command not found`.
 It writes one line to your shell's own profile (`.zshrc`, `.bashrc`,
 `config.fish`, `.profile`), once; open a new terminal afterwards. Until then
-the full path works: `~/.local/bin/gravitone ui`.
+the full path works: `~/.local/bin/gravitone ui`. `--prefix DIR` puts the
+commands somewhere else entirely.
 
 When it offers to open the control panel at the end, it starts it **detached**
 (`setsid`), so the UI keeps running after that terminal window closes —
@@ -85,12 +97,18 @@ reopens itself in one (konsole, gnome-terminal, xfce4-terminal, kitty,
 alacritty, foot, xterm — whichever you have), so you can watch the install and
 answer its two questions. `--no-terminal` keeps it in place.
 
+**Upgrading** is the same script again — it says so (`Upgrading gravitone
+1.0.0 -> 1.1.0`) and leaves your library, playlists and settings where they
+are.
+
 Uninstall with `./install.sh --uninstall` / `.\install.ps1 -Uninstall`; both
-leave your library and config alone. `make help` lists the same tasks for
-developers.
+leave your library and config alone, and take `--purge` / `-Purge` if you want
+the settings gone too. `make help` lists the same tasks for developers.
 
 You also need one player: `ffmpeg` (for `ffplay`), `mpv`, or `vlc` — the
 installers offer to fetch one. Check any time with `gravitone doctor`.
+
+[What changed between versions](CHANGELOG.md).
 
 ## Use
 
@@ -120,7 +138,7 @@ gravitone link ~/Music/Outer\ Wilds               # or link track by track
 gravitone play
 ```
 
-While playing in a terminal: `n` skips, `b` bans (skip and drop it from this
+While playing in a terminal: `n` skips, `r` removes (skips and drops it from this
 playlist), `q` quits.
 
 ```
@@ -195,6 +213,7 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 | --- | --- |
 | ![The track table, sorted by album, with one row playing](docs/ui-library.png) | ![Settings: gaps, levels, fade, playlists](docs/ui-settings.png) |
 | ![The file browser, with a folder opened where it stands](docs/ui-browse.png) | ![Adding: a whole folder, or just the files in it](docs/ui-add.png) |
+| ![Now playing, with Remove armed and its confirm dropped below](docs/ui-now.png) | |
 
 - **Top bar** — the playlist selector; switching it switches what plays. The
   button says what pressing it does — **Play**, then **Stop** — and a green

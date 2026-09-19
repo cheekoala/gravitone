@@ -2,12 +2,14 @@
 # gravitone installer for Linux, macOS, *BSD and WSL.
 #
 #   ./install.sh                 install for the current user
+#   ./install.sh --yes           never ask anything; take every default
 #   ./install.sh --with-player   also install an audio player (asks first)
 #   ./install.sh --shortcut      add menu and desktop shortcuts without asking
 #   ./install.sh --no-shortcut   skip the shortcuts
 #   ./install.sh --path          put ~/.local/bin on your PATH without asking
 #   ./install.sh --no-path       leave your shell profile alone
-#   ./install.sh --uninstall     remove it again
+#   ./install.sh --prefix DIR    install somewhere other than ~/.local
+#   ./install.sh --uninstall     remove it again (add --purge to drop settings)
 #
 # Double-clicking this in Dolphin, Nautilus or Thunar runs it with no terminal
 # attached, so everything it prints goes nowhere and it looks like nothing
@@ -36,22 +38,56 @@ die()  { warn "$*"; exit 1; }
 
 WITH_PLAYER=0
 UNINSTALL=0
+PURGE=0
 SHORTCUT=ask
 PATH_SETUP=ask
 REOPEN=1
-for arg in "$@"; do
-  case "$arg" in
+ASSUME_YES=0
+while [ $# -gt 0 ]; do
+  case "$1" in
     --with-player) WITH_PLAYER=1 ;;
     --uninstall) UNINSTALL=1 ;;
+    --purge) PURGE=1 ;;
     --shortcut) SHORTCUT=yes ;;
     --no-shortcut) SHORTCUT=no ;;
     --path) PATH_SETUP=yes ;;
     --no-path) PATH_SETUP=no ;;
     --no-terminal) REOPEN=0 ;;
-    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) die "unknown option: $arg" ;;
+    --yes|-y) ASSUME_YES=1 ;;
+    --prefix) shift; [ $# -gt 0 ] || die "--prefix needs a folder"; PREFIX="$1" ;;
+    --prefix=*) PREFIX="${1#--prefix=}" ;;
+    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option: $1" ;;
   esac
+  shift
 done
+BIN="$PREFIX/bin"
+
+# Answer a question, or take the default without asking. --yes and a missing
+# terminal are the same thing: nobody is there to answer.
+ask() {
+  # ask "prompt" "default"  ->  prints y or n
+  if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then printf '%s' "$2"; return; fi
+  printf '%s ' "$1" >&2
+  read -r reply || reply=""
+  case "$reply" in
+    [yY]*) printf 'y' ;;
+    [nN]*) printf 'n' ;;
+    *) printf '%s' "$2" ;;
+  esac
+}
+
+# If anything below falls over, say where rather than leaving a half-install
+# and a bare shell error.
+on_failure() {
+  status=$?
+  [ "$status" -eq 0 ] && exit 0
+  warn "the install stopped early (exit $status)."
+  say "Nothing outside $PREFIX and $VENV was touched."
+  say "If you cannot tell why, run it again with:  sh -x $0"
+  exit "$status"
+}
+trap on_failure EXIT
 
 # -- run somewhere the output can be read ----------------------------------
 # A file manager launches this with no terminal: stdout is not a tty and
@@ -97,20 +133,43 @@ find_python() {
 # -- uninstall -------------------------------------------------------------
 if [ "$UNINSTALL" -eq 1 ]; then
   step "Removing $APP"
-  rm -f "$BIN/$APP"
+  rm -f "$BIN/$APP" "$BIN/grav"
   rm -rf "$VENV"
+  command -v pipx >/dev/null 2>&1 && pipx uninstall gravitone >/dev/null 2>&1 || true
   rm -f "$HOME/.local/share/applications/gravitone.desktop"
   rm -f "$HOME/.local/share/icons/hicolor/scalable/apps/gravitone.svg"
   rm -f "$HOME/Desktop/gravitone.desktop"
   DESKTOP_DIR=$( (command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP) || echo "$HOME/Desktop")
   rm -f "$DESKTOP_DIR/gravitone.desktop"
-  say "Removed. Your library and config were left alone:"
-  say "  ${DIM}~/.local/share/custom soundtrack${OFF}   ${DIM}~/.config/gravitone${OFF}"
+  if [ "$PURGE" -eq 1 ]; then
+    rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/gravitone"
+    say "Removed, settings and all. Your music was never touched."
+  else
+    say "Removed. Your library and settings were left alone:"
+    say "  ${DIM}~/.local/share/custom soundtrack${OFF}   ${DIM}~/.config/gravitone${OFF}"
+    say "  ${DIM}(--purge also removes the settings)${OFF}"
+  fi
+  trap - EXIT
   exit 0
 fi
 
 PYTHON=$(find_python) || die "Python 3.9+ not found. Install python3 and run this again."
 step "Using $PYTHON ($("$PYTHON" -c 'import platform; print(platform.python_version())'))"
+
+# What is already here, so an upgrade says so instead of looking like a
+# first install that mysteriously kept your music.
+BEFORE=""
+if [ -x "$BIN/$APP" ]; then
+  BEFORE=$("$BIN/$APP" --version 2>/dev/null | awk '{print $NF}') || BEFORE=""
+fi
+WANT=$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$SRC/pyproject.toml" 2>/dev/null | head -1)
+if [ -n "$BEFORE" ]; then
+  if [ "$BEFORE" = "$WANT" ]; then
+    step "Reinstalling $APP $WANT"
+  else
+    step "Upgrading $APP $BEFORE -> ${WANT:-newer}"
+  fi
+fi
 
 # -- install ---------------------------------------------------------------
 mkdir -p "$BIN"
@@ -119,12 +178,29 @@ if command -v pipx >/dev/null 2>&1; then
   pipx install --force "$SRC"
 else
   step "Installing into $VENV"
-  "$PYTHON" -m venv "$VENV" 2>/dev/null || die "could not create a venv. On Debian/Ubuntu: sudo apt install python3-venv"
-  "$VENV/bin/python" -m pip install --quiet --upgrade pip
-  "$VENV/bin/python" -m pip install --quiet "$SRC"
+  "$PYTHON" -m venv "$VENV" 2>/dev/null ||
+    die "could not create a virtualenv. On Debian/Ubuntu: sudo apt install python3-venv"
+  "$VENV/bin/python" -m pip install --quiet --upgrade pip ||
+    warn "could not update pip in the virtualenv; carrying on with the one it has"
+  "$VENV/bin/python" -m pip install --quiet "$SRC" ||
+    die "pip could not install $APP. Run it again without --quiet to see why:
+    $VENV/bin/python -m pip install '$SRC'"
   ln -sf "$VENV/bin/$APP" "$BIN/$APP"
-  say "Linked $BIN/$APP"
+  ln -sf "$VENV/bin/grav" "$BIN/grav" 2>/dev/null || true
+  say "Linked $BIN/$APP  (and $BIN/grav)"
 fi
+
+# -- did it actually work? -------------------------------------------------
+# An installer that reports success without ever running the thing is just a
+# hopeful copy.
+INSTALLED=""
+if [ -x "$BIN/$APP" ]; then
+  INSTALLED=$("$BIN/$APP" --version 2>/dev/null) || INSTALLED=""
+elif command -v "$APP" >/dev/null 2>&1; then
+  INSTALLED=$("$APP" --version 2>/dev/null) || INSTALLED=""
+fi
+[ -n "$INSTALLED" ] || die "installed, but '$APP --version' did not run. Something is wrong with the virtualenv at $VENV"
+step "Installed $INSTALLED"
 
 # -- audio player ----------------------------------------------------------
 have_player() {
@@ -157,10 +233,13 @@ else
     sh -c "$CMD"
   else
     say ""
-    say "No audio player found. gravitone needs one of ffmpeg / mpv / vlc."
-    printf 'Run %s%s%s now? [y/N] ' "$BOLD" "$CMD" "$OFF"
-    if [ -t 0 ]; then read -r reply; else reply=n; fi
-    case "$reply" in [yY]*) sh -c "$CMD" ;; *) say "Skipped - run it yourself later." ;; esac
+    say "No audio player found. $APP needs one of ffmpeg / mpv / vlc."
+    say "  ${DIM}$CMD${OFF}"
+    if [ "$(ask "Run it now? [y/N]" n)" = y ]; then
+      sh -c "$CMD" || warn "that did not work - install a player yourself and try again"
+    else
+      say "Skipped - run it yourself later, then: $APP doctor"
+    fi
   fi
 fi
 
@@ -215,9 +294,11 @@ if [ "$(uname -s)" = "Linux" ] && [ -f "$SRC/packaging/gravitone.desktop" ]; the
     no) ;;
     *)
       say ""
-      printf 'Add gravitone to your application menu and desktop? [Y/n] '
-      if [ -t 0 ]; then read -r reply; else reply=y; fi
-      case "$reply" in [nN]*) say "Skipped." ;; *) install_shortcuts ;; esac
+      if [ "$(ask "Add $APP to your application menu and desktop? [Y/n]" y)" = y ]; then
+        install_shortcuts
+      else
+        say "Skipped."
+      fi
       ;;
   esac
 fi
@@ -282,30 +363,27 @@ case ":$PATH:" in
     if [ "$PATH_SETUP" = "no" ]; then
       say "Add this to $(profile_for_shell) yourself:"
       say "    $(path_line_for "$(profile_for_shell)")"
-    elif [ "$PATH_SETUP" = "yes" ] || [ ! -t 0 ]; then
+    elif [ "$PATH_SETUP" = "yes" ] || [ ! -t 0 ] || [ "$ASSUME_YES" -eq 1 ]; then
+      add_to_path
+    elif [ "$(ask "Add it to $(basename "$(profile_for_shell)") for you? [Y/n]" y)" = y ]; then
       add_to_path
     else
-      printf 'Add it to %s for you? [Y/n] ' "$(basename "$(profile_for_shell)")"
-      read -r reply
-      case "$reply" in
-        [nN]*)
-          say "Left alone. The line you need:"
-          say "    $(path_line_for "$(profile_for_shell)")"
-          ;;
-        *) add_to_path ;;
-      esac
+      say "Left alone. The line you need:"
+      say "    $(path_line_for "$(profile_for_shell)")"
     fi
     ;;
 esac
 
+# -- a last look over the whole thing --------------------------------------
+say ""
+step "Checking the setup"
+"$BIN/$APP" doctor 2>/dev/null | sed -n '/^players found/p;/^tags & lengths/p;/^file chooser/p' |
+  while IFS= read -r line; do say "    ${DIM}$line${OFF}"; done
+
 say ""
 step "Done"
-if [ -t 0 ]; then
-  printf 'Open the control panel now? [Y/n] '
-  read -r reply
-  case "$reply" in
-    [nN]*) ;;
-    *)
+if [ "$(ask "Open the control panel now? [Y/n]" y)" = y ]; then
+  {
       # Detached, or it dies with this terminal when the window closes -
       # which looked exactly like "the control panel never opened".
       LOG="${XDG_STATE_HOME:-$HOME/.local/state}/gravitone"
@@ -317,9 +395,9 @@ if [ -t 0 ]; then
       fi
       sleep 2
       say "  started in the background - log: ${DIM}$LOG/ui.log${OFF}"
-      ;;
-  esac
+  }
 fi
+trap - EXIT
 say ""
 if [ "$ON_PATH" -eq 1 ]; then
   RUN=$APP
