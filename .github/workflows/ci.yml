@@ -22,3 +22,78 @@ jobs:
       - run: python -m pip install -e .
       - run: python -m pytest -q
       - run: python -m gravitone doctor || true
+
+  # The installers are the first thing anybody runs and the last thing anybody
+  # tests. These run them for real, on each platform, and then check that the
+  # command they claim to have installed actually starts.
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install it the way a person would
+        run: ./install.sh --yes --no-shortcut --no-path --no-terminal
+
+      - name: The thing it installed has to run
+        run: |
+          "$HOME/.local/bin/gravitone" --version
+          "$HOME/.local/bin/grav" --version
+          "$HOME/.local/bin/gravitone" doctor
+
+      - name: Installing again is an upgrade, not a mess
+        run: |
+          ./install.sh --yes --no-shortcut --no-path --no-terminal | tee second.log
+          grep -q "Reinstalling" second.log
+          "$HOME/.local/bin/gravitone" --version
+
+      - name: And it can be taken off again
+        run: |
+          ./install.sh --uninstall
+          test ! -e "$HOME/.local/bin/gravitone"
+
+  install-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install it the way a person would
+        shell: powershell
+        run: .\install.ps1 -Yes -NoShortcut
+
+      - name: The thing it installed has to run
+        shell: powershell
+        run: |
+          $exe = "$env:LOCALAPPDATA\Gravitone\venv\Scripts\gravitone.exe"
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'gravitone --version failed' }
+          & $exe doctor
+          # The shim is what puts it on PATH; if that is missing, nobody can
+          # type `gravitone` no matter how well the venv turned out.
+          $shim = "$env:LOCALAPPDATA\Microsoft\WindowsApps\gravitone.cmd"
+          if (-not (Test-Path $shim)) { throw "no shim at $shim" }
+          & $shim --version
+          if ($LASTEXITCODE -ne 0) { throw 'the shim does not work' }
+
+      - name: Installing again is an upgrade, not a mess
+        shell: powershell
+        run: |
+          .\install.ps1 -Yes -NoShortcut | Tee-Object -FilePath second.log
+          if (-not (Select-String -Path second.log -Pattern 'Reinstalling')) {
+            throw 'a second install should say it is reinstalling'
+          }
+
+      - name: And it can be taken off again
+        shell: powershell
+        run: |
+          .\install.ps1 -Uninstall
+          if (Test-Path "$env:LOCALAPPDATA\Gravitone\venv") { throw 'the venv is still there' }

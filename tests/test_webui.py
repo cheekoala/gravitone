@@ -982,3 +982,61 @@ def test_the_state_says_where_this_playlist_lives(server):
     links = Path(request(httpd, "/api/state")["links"])
     assert links.parent.name == "survival"        # named, not an opaque id
     assert links.name == "music"
+
+
+# -- bundles, which take a while -----------------------------------------
+
+
+def test_the_state_offers_the_audio_settings(server):
+    httpd, *_ = server
+    offered = {row["name"]: row for row in request(httpd, "/api/state")["audio"]}
+    assert "original" in offered and offered["original"]["available"] is True
+    assert "mp3" in offered and offered["mp3"]["kbps"] > 0
+
+
+def test_a_plan_says_what_a_bundle_would_weigh(server):
+    httpd, session, config, _ = server
+    with_music(config, session)
+
+    plan = request(httpd, "/api/plan", {"audio": "mp3"})["result"]
+    assert plan["tracks"] == 3
+    assert plan["audio"] == "mp3"
+    # 60 + 70 + 80 seconds of tags at 245 kbps is a few megabytes.
+    assert 5e6 < plan["bytes"] < 8e6
+    assert "MP3" in plan["label"]
+
+
+def test_packing_runs_in_the_background_and_reports(server, tmp_path):
+    import time as clock
+
+    httpd, session, config, _ = server
+    with_music(config, session)
+    out = tmp_path / "share.zip"
+
+    started = request(httpd, "/api/pack", {"path": str(out)})["packing"]
+    assert started["running"] is True
+    assert started["total"] == 3
+    assert started["path"] == str(out)
+
+    for _ in range(200):
+        packing = request(httpd, "/api/state")["packing"]
+        if not packing["running"]:
+            break
+        clock.sleep(0.05)
+    assert packing["error"] is None
+    assert packing["done"] == 3
+    assert packing["bytes"] > 0
+    assert out.exists()
+
+
+def test_two_bundles_at_once_is_refused(server, tmp_path):
+    httpd, session, config, _ = server
+    with_music(config, session)
+    session._packing = {"running": True, "done": 0, "total": 9}
+    with pytest.raises(urllib.error.HTTPError):
+        request(httpd, "/api/pack", {"path": str(tmp_path / "share.zip")})
+
+
+def test_a_bundle_needs_somewhere_to_go(server):
+    with pytest.raises(urllib.error.HTTPError):
+        request(server[0], "/api/pack", {})

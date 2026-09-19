@@ -372,6 +372,18 @@ class Handler(BaseHTTPRequestHandler):
                 session.forget_covers() if body.get("again") else session.find_covers()
             )
             return {**session.snapshot(), "result": result}
+        elif route == "pack":
+            path = body.get("path")
+            if not path:
+                raise ValueError("a bundle needs a path")
+            result = session.pack(path, body.get("audio"), body.get("only") or None)
+            return {**session.snapshot(), "result": result}
+        elif route == "pack-stop":
+            session.stop_packing()
+            return session.snapshot()
+        elif route == "plan":
+            result = session.bundle_plan(body.get("only") or None, body.get("audio"))
+            return {**session.snapshot(), "result": result}
         elif route == "mirror":
             result = session.mirror()
             return {**session.snapshot(), "result": result}

@@ -1,0 +1,89 @@
+name: release
+
+# Tag it and the release builds itself:
+#
+#     git tag -a v0.2.0 -m "Gravitone 0.2.0"
+#     git push origin v0.2.0
+#
+# What comes out is a zip anybody can download and unpack - no git, no
+# clone - plus the usual Python artefacts for anyone who would rather
+# `pipx install` the wheel.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check it before shipping it
+        run: |
+          python -m pip install --upgrade pip pytest build
+          python -m pip install -e .
+          python -m pytest -q -k "not layout"
+
+      - name: The version in the tag has to be the version in the package
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          packaged=$(python -c "import tomllib,pathlib; \
+            print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          module=$(python -c "import gravitone; print(gravitone.__version__)")
+          if [ "$tag" != "$packaged" ] || [ "$tag" != "$module" ]; then
+            echo "tag $tag, pyproject $packaged, package $module - they must match" >&2
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_ENV"
+
+      - name: Build the wheel and the sdist
+        run: python -m build
+
+      - name: Build the zip somebody downloads
+        run: |
+          name="gravitone-${{ env.version }}"
+          mkdir -p "dist-zip/$name"
+          cp -r gravitone packaging docs install.sh install.ps1 \
+                pyproject.toml README.md LICENSE "dist-zip/$name/"
+          rm -rf "dist-zip/$name/gravitone/__pycache__"
+          chmod +x "dist-zip/$name/install.sh"
+          (cd dist-zip && zip -qr "../dist/$name.zip" "$name")
+          ls -la dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/*.zip
+            dist/*.whl
+            dist/*.tar.gz
+          body: |
+            **Gravitone ${{ env.version }}** — your own soundtrack for any game.
+
+            ### Install
+
+            Download `gravitone-${{ env.version }}.zip` below, unpack it, and run
+            the installer for your machine. No git, no build tools, nothing to
+            configure.
+
+            | | |
+            | --- | --- |
+            | **Linux, macOS, BSD, WSL** | `./install.sh` |
+            | **Windows** | right-click `install.ps1` → *Run with PowerShell* |
+
+            It installs into a private virtualenv, puts `gravitone` (and `grav`)
+            on your PATH, offers to install ffmpeg if you have no audio player,
+            and can add a menu and desktop shortcut. `./install.sh --uninstall`
+            takes it all off again.
+
+            You will also need **ffmpeg**, **mpv** or **VLC** for playback — the
+            installer offers to fetch one.

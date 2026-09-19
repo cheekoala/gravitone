@@ -710,3 +710,205 @@ def test_a_played_track_can_be_taken_out_and_put_back(served_playing):
             )
         finally:
             browser.close()
+
+
+def test_a_bundle_says_what_it_will_weigh_before_it_starts(served, tmp_path):
+    """Nobody should find out a bundle is fifteen gigabytes by waiting."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=settings]")
+            page.wait_for_function(
+                "() => document.getElementById('bundle-size').textContent !== '—'",
+                timeout=15000,
+            )
+            kept = page.inner_text("#bundle-size")
+            assert "copied as they are" in kept
+
+            page.select_option("#bundle-audio", "mp3")
+            page.wait_for_function(
+                "() => document.getElementById('bundle-size')"
+                ".textContent.includes('converted')",
+                timeout=15000,
+            )
+            converted = page.inner_text("#bundle-size")
+            assert "as they are" in converted and "converted" in converted
+
+            # Every setting is offered, and the ones this machine cannot do
+            # are shown as such rather than hidden.
+            options = page.evaluate(
+                """() => [...document.querySelectorAll('#bundle-audio option')]
+                        .map((o) => ({ value: o.value, off: o.disabled }))"""
+            )
+            assert [o["value"] for o in options][:2] == ["original", "mp3"]
+            assert options[0]["off"] is False
+        finally:
+            browser.close()
+
+
+def test_packing_shows_progress_and_can_be_stopped(served, tmp_path):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.click("[data-panel=settings]")
+            page.wait_for_selector("#export-bundle", timeout=15000)
+            assert page.is_hidden("#packing")
+            assert page.is_hidden("#bundle-stop")
+
+            # No desktop dialog here, so it falls back to the path box.
+            page.click("#export-bundle")
+            page.wait_for_selector("#transfer-form:not([hidden])", timeout=15000)
+            page.fill("#transfer-path", str(tmp_path / "share.zip"))
+            page.press("#transfer-path", "Enter")
+
+            page.wait_for_function(
+                """() => document.getElementById('packing-note')
+                        .textContent.startsWith('Wrote')""",
+                timeout=30000,
+            )
+            assert page.evaluate(
+                "document.getElementById('packing-bar').style.width") == "100%"
+            assert (tmp_path / "share.zip").exists()
+            # Back to ready: the buttons are usable again.
+            assert page.is_hidden("#bundle-stop")
+            assert not page.is_disabled("#export-bundle")
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize("panel", ["now", "music", "settings", "add", "party"])
+def test_the_page_itself_never_scrolls(served, panel):
+    """The app is a window, not a document. A panel taller than the viewport
+    scrolls inside itself; it must not push the page down and leave a band of
+    nothing under the app to scroll back out of."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        # Short enough that every panel overflows it.
+        page = browser.new_page(viewport={"width": 1400, "height": 620})
+        try:
+            page.goto(served)
+            page.click(f"[data-panel={panel}]")
+            page.wait_for_timeout(400)
+            measured = page.evaluate(
+                """() => {
+                    const root = document.documentElement;
+                    const app = document.querySelector('.app');
+                    return {
+                      document: root.scrollHeight,
+                      viewport: root.clientHeight,
+                      appBottom: Math.round(app.getBoundingClientRect().bottom),
+                    };
+                }"""
+            )
+            assert measured["document"] <= measured["viewport"], measured
+            assert measured["appBottom"] <= measured["viewport"] + 1, measured
+
+            # ...and it cannot be scrolled, even if something asks it to.
+            page.evaluate("window.scrollTo(0, 4000)")
+            page.wait_for_timeout(150)
+            assert page.evaluate("window.scrollY") == 0
+        finally:
+            browser.close()
+
+
+def test_a_long_panel_still_scrolls_inside_itself(served):
+    """Pinning the shell must not cost the scrolling that made it necessary."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1400, "height": 620})
+        try:
+            page.goto(served)
+            page.click("[data-panel=settings]")
+            page.wait_for_timeout(400)
+            room = page.evaluate(
+                """() => { const s = document.querySelector('.stage');
+                     return s.scrollHeight - s.clientHeight; }"""
+            )
+            assert room > 100, "settings should be taller than the window"
+            page.evaluate(
+                "document.querySelector('.stage').scrollTo(0, 100000)")
+            page.wait_for_timeout(200)
+            assert page.evaluate(
+                """() => { const s = document.querySelector('.stage');
+                     return s.scrollTop + s.clientHeight >= s.scrollHeight - 2; }"""
+            )
+        finally:
+            browser.close()
+
+
+def test_a_fresh_install_says_what_to_do_next(tmp_path):
+    """Install it, open it, press the big green button, get "Stopped" and no
+    reason at all. That was the first thing anybody would have seen."""
+    config = Config(root=str(tmp_path / "custom soundtrack"))
+    store = playlists.Store()
+    library.init(config, store.current())
+    session = Session(config, tmp_path / "config.json", store=store)
+    httpd = webui.serve(session, host="127.0.0.1", port=0, open_browser=False)
+    url = f"http://127.0.0.1:{httpd.server_port}/#{httpd.token}"
+    try:
+        with playwright.sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROME)
+            page = browser.new_page(viewport={"width": 1180, "height": 820})
+            try:
+                page.goto(url)
+                page.wait_for_selector("#notice:not([hidden])", timeout=15000)
+                assert page.inner_text("#notice-lead") == "No music yet"
+                assert "folder of music" in page.inner_text("#notice-detail")
+
+                # And the way out of it is one click, not a manual page.
+                page.click("#notice-do")
+                page.wait_for_selector("#panel-add.active", timeout=15000)
+            finally:
+                browser.close()
+    finally:
+        session.stop()
+        httpd.shutdown()
+
+
+def test_with_no_audio_player_it_says_so_rather_than_failing_quietly(served):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 820})
+        try:
+            page.goto(served)
+            page.wait_for_timeout(600)
+            page.evaluate(
+                """() => {
+                    const real = window.fetch;
+                    window.fetch = (url, opts) => real(url, opts).then(async (res) => {
+                        if (String(url).indexOf('/api/state') === -1) return res;
+                        const data = await res.json();
+                        data.players = [];
+                        return new Response(JSON.stringify(data), {
+                            status: 200,
+                            headers: { 'Content-Type': 'application/json' },
+                        });
+                    });
+                }"""
+            )
+            page.wait_for_function(
+                """() => document.getElementById('notice-lead')
+                        .textContent === 'No audio player found'""",
+                timeout=15000,
+            )
+            assert "ffmpeg" in page.inner_text("#notice-detail")
+            assert "bad" in page.get_attribute("#notice", "class")
+        finally:
+            browser.close()
+
+
+def test_a_playing_library_shows_no_notice(served_playing):
+    url, _ = served_playing
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 820})
+        try:
+            page.goto(url)
+            page.wait_for_timeout(1200)
+            assert page.is_hidden("#notice")
+        finally:
+            browser.close()

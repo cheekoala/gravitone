@@ -97,6 +97,14 @@
     <main class="stage">
       <!-- NOW -->
       <section class="panel active" id="panel-now">
+        <div class="notice" id="notice" hidden>
+          <div class="notice-body">
+            <strong id="notice-lead"></strong>
+            <span id="notice-detail"></span>
+          </div>
+          <button class="primary small" id="notice-do" hidden></button>
+        </div>
+
         <div class="card now">
           <div class="now-head">
             <div class="cover empty" id="now-cover">♪</div>
@@ -428,7 +436,6 @@
           <div class="add-tools">
             <button class="ghost small" data-export="json">Export manifest</button>
             <button class="ghost small" data-export="csv">Export CSV</button>
-            <button class="ghost small" data-export="bundle">Export bundle…</button>
             <button class="ghost small" id="import-file">Import…</button>
           </div>
           <form class="path-form" id="transfer-form" hidden>
@@ -436,6 +443,20 @@
             <button class="ghost small" type="submit" id="transfer-go">Go</button>
           </form>
           <p class="hint" id="transfer-note" hidden></p>
+
+          <div class="bundle">
+            <label class="field"><span>Bundle audio</span>
+              <select id="bundle-audio"></select></label>
+            <p class="hint" id="bundle-size">—</p>
+            <div class="add-tools">
+              <button class="ghost small" id="export-bundle">Export bundle…</button>
+              <button class="ghost small" id="bundle-stop" hidden>Stop</button>
+            </div>
+            <div class="packing" id="packing" hidden>
+              <div class="progress"><div class="progress-fill" id="packing-bar"></div></div>
+              <p class="hint" id="packing-note"></p>
+            </div>
+          </div>
         </div>
         <div class="card">
           <div class="kicker">Playback</div>

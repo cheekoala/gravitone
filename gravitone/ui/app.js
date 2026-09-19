@@ -227,6 +227,48 @@
     });
   }
 
+  // What to do next, where the button that needs it is. The server knows
+  // perfectly well why nothing played; until now it only said so at the
+  // bottom of the settings panel, which is no use to somebody who has just
+  // installed this and pressed the big green button.
+  function renderNotice(next) {
+    const counts = next.counts || {};
+    const players = next.players || [];
+    let lead = "";
+    let detail = "";
+    let action = null;
+    let bad = false;
+
+    if (!players.length) {
+      bad = true;
+      lead = "No audio player found";
+      detail = "Gravitone plays through ffmpeg, mpv or VLC. Install one of "
+        + "them and press Play again — ffmpeg is the usual choice.";
+    } else if (!counts.music) {
+      lead = "No music yet";
+      detail = "Point Gravitone at a folder of music and it will play it, "
+        + "shuffled, with quiet between the songs. Nothing is copied or moved.";
+      action = { label: "Add music", go: () => showPanel("add") };
+    } else if (next.error) {
+      bad = true;
+      lead = "That did not work";
+      detail = next.error;
+    }
+
+    const notice = $("notice");
+    notice.hidden = !lead;
+    notice.classList.toggle("bad", bad);
+    if (!lead) return;
+    $("notice-lead").textContent = lead;
+    $("notice-detail").textContent = detail;
+    const button = $("notice-do");
+    button.hidden = !action;
+    if (action) {
+      button.textContent = action.label;
+      button.onclick = action.go;
+    }
+  }
+
   function toast(message, bad, stay) {
     const node = $("toast");
     node.textContent = message;
@@ -392,6 +434,8 @@
       hideToast();
     }
     renderParty(next);
+    renderAudioChoices(next);
+    renderNotice(next);
 
     const nowPanel = $("panel-now");
     // A track nobody here has is quiet in this room, so it reads as a gap -
@@ -1314,6 +1358,96 @@
     toast(`Imported ${added.join(", ")}`);
   }
 
+  // -- bundles ----------------------------------------------------------
+  //
+  // Four hundred FLACs is fifteen gigabytes and several minutes of work, so
+  // this one says what it will weigh before it starts, runs in the
+  // background, and can be called off.
+
+  const bytes = (count) => {
+    if (count >= 1e9) return `${(count / 1e9).toFixed(1)} GB`;
+    if (count >= 1e6) return `${Math.round(count / 1e6)} MB`;
+    return `${Math.round(count / 1e3)} KB`;
+  };
+
+  let audioOffered = null;
+
+  function renderAudioChoices(next) {
+    const offered = next.audio || [];
+    const shape = JSON.stringify(offered);
+    if (shape !== audioOffered) {
+      audioOffered = shape;
+      const select = $("bundle-audio");
+      const chosen = select.value;
+      select.replaceChildren();
+      offered.forEach((option) => {
+        const node = el("option", null, option.label
+          + (option.available ? "" : " — needs ffmpeg"));
+        node.value = option.name;
+        node.disabled = !option.available;
+        select.append(node);
+      });
+      if (chosen) select.value = chosen;
+    }
+    renderPacking(next.packing);
+  }
+
+  function renderPacking(packing) {
+    const running = !!(packing && packing.running);
+    $("packing").hidden = !packing;
+    $("bundle-stop").hidden = !running;
+    $("export-bundle").disabled = running;
+    $("bundle-audio").disabled = running;
+    if (!packing) return;
+    const share = packing.total ? packing.done / packing.total : 0;
+    $("packing-bar").style.width = `${Math.round(share * 100)}%`;
+    if (running) {
+      const left = packing.total - packing.done;
+      $("packing-note").textContent =
+        `${packing.done} of ${packing.total} — ${packing.name || "…"}`
+        + (left ? "" : " — writing the zip");
+    } else if (packing.error) {
+      $("packing-note").textContent = packing.error;
+    } else {
+      $("packing-note").textContent =
+        `Wrote ${packing.path} — ${packing.done} track(s), ${bytes(packing.bytes)}`;
+    }
+  }
+
+  async function showBundleSize() {
+    const audio = $("bundle-audio").value;
+    const done = await call("plan", { audio });
+    if (!done) return;
+    const { tracks, original, bytes: guess, audio: kind } = done.result;
+    $("bundle-size").innerHTML = kind === "original"
+      ? `<strong>${tracks}</strong> track(s), <strong>${bytes(original)}</strong> — copied as they are.`
+      : `<strong>${tracks}</strong> track(s): ${bytes(original)} as they are, `
+        + `about <strong>${bytes(guess)}</strong> converted.`;
+  }
+
+  $("bundle-audio").addEventListener("change", showBundleSize);
+
+  $("export-bundle").addEventListener("click", (event) =>
+    withSpinner(event.currentTarget, async () => {
+      const suggested = EXPORT_NAMES.bundle;
+      const picked = await askForPath("save", "Export bundle", suggested);
+      const start = async (path) => {
+        const done = await call("pack", { path, audio: $("bundle-audio").value });
+        if (done) toast("Packing — this runs in the background");
+      };
+      if (picked === undefined) {
+        askInline("Export", `where to write ${suggested}`, start);
+        return;
+      }
+      if (picked) await start(picked);
+    }));
+
+  $("bundle-stop").addEventListener("click", (event) =>
+    withSpinner(event.currentTarget, async () => {
+      await call("pack-stop", {});
+      toast("Stopping…");
+    }));
+
   document.querySelectorAll("[data-export]").forEach((button) =>
     button.addEventListener("click", () => withSpinner(button, async () => {
       const kind = button.dataset.export;
@@ -1537,6 +1671,9 @@
     document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === `panel-${name}`));
     document.querySelectorAll(".rail-btn").forEach((b) => b.classList.toggle("active", b.dataset.panel === name));
     if (name === "add") browse(browsePath);
+    // The estimate costs a walk of the library, so it is worked out when the
+    // panel is opened rather than on every poll.
+    if (name === "settings") showBundleSize();
     if (name === "music" || name === "ambient") loadLibrary(name);
     restoreScroll(name);
   }

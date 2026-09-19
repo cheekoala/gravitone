@@ -26,6 +26,7 @@ from gravitone import (
     player,
     playlists,
     tags,
+    transcode,
     transfer,
 )
 from gravitone.config import Config
@@ -79,6 +80,7 @@ class Session:
         )
         self._art_pending = 0
         self._started = time.time()
+        self._packing: dict | None = None
         self._party: party_module.Party | None = None
         self._party_note: str | None = None
         library.configure_index(self._index_path())
@@ -140,6 +142,8 @@ class Session:
             "error": self._error,
             "backend": self._backend.name if self._backend else None,
             "players": player.available(),
+            # Which ways of shrinking the audio this machine can manage.
+            "audio": transcode.choices(),
             "picker": self.picker_available,
             "version": __version__,
             # Updated underneath ourselves? Then this process is serving a
@@ -169,6 +173,7 @@ class Session:
                 }
                 for item in self.store.playlists
             ],
+            "packing": self._packing,
             "party": self.party_state(),
             "playlist": self.playlist.id,
             # Where this playlist's symlinks live, so the UI can point a file
@@ -956,6 +961,76 @@ class Session:
             "skipped": report.skipped,
             "bytes": report.path.stat().st_size if report.path.exists() else 0,
         }
+
+    # -- bundling, which can take a while ---------------------------------
+
+    def audio_choices(self) -> list:
+        return transcode.choices()
+
+    def bundle_plan(self, only: list | None = None, audio: str | None = None) -> dict:
+        """What a bundle would weigh, before anybody starts making one."""
+        return transfer.bundle_plan(
+            self.config, self.store, only, audio=audio, reader=self._tags
+        )
+
+    def pack(self, path: str, audio: str | None = None, only: list | None = None) -> dict:
+        """Start writing a bundle in the background.
+
+        Four hundred tracks is not a thing to do on a request thread: it is
+        minutes of work, and the page has to be able to say how far along it
+        is and to call it off.
+        """
+        if self._packing and self._packing.get("running"):
+            raise RuntimeError("a bundle is already being written")
+        plan = self.bundle_plan(only, audio)
+        self._packing = {
+            "running": True,
+            "done": 0,
+            "total": plan["tracks"],
+            "name": "",
+            "path": str(Path(path).expanduser()),
+            "audio": plan["audio"],
+            "label": plan["label"],
+            "expected": plan["bytes"],
+            "bytes": 0,
+            "error": None,
+            "stopping": False,
+            "started": time.time(),
+        }
+        state = self._packing
+
+        def work() -> None:
+            def progress(done: int, total: int, name: str) -> None:
+                state["done"], state["total"], state["name"] = done, total, name
+
+            try:
+                report = transfer.export_bundle(
+                    self.config,
+                    self.store,
+                    Path(state["path"]),
+                    only,
+                    on_progress=progress,
+                    audio=audio,
+                    should_stop=lambda: state["stopping"],
+                )
+                state["path"] = str(report.path)
+                state["bytes"] = report.path.stat().st_size
+                state["skipped"] = report.skipped
+                state["done"] = report.tracks
+            except Exception as exc:          # shown on the page, not lost
+                state["error"] = str(exc)
+            finally:
+                state["running"] = False
+                state["finished"] = time.time()
+
+        threading.Thread(target=work, daemon=True, name="gravitone-bundle").start()
+        return dict(state)
+
+    def stop_packing(self) -> dict | None:
+        """Call off a bundle that is still being written."""
+        if self._packing and self._packing.get("running"):
+            self._packing["stopping"] = True
+        return self._packing
 
     def import_file(self, path: str, name: str | None = None) -> dict:
         source = Path(path).expanduser()

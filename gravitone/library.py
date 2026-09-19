@@ -195,6 +195,10 @@ def link(
     return LinkResult(linked=linked, skipped=skipped)
 
 
+def _on_windows() -> bool:
+    return os.name == "nt"
+
+
 def _make_link(destination: Path, link_to: Path, target: Path) -> None:
     """Symlink, falling back to a hard link where symlinks are privileged.
 
@@ -210,7 +214,18 @@ def _make_link(destination: Path, link_to: Path, target: Path) -> None:
             os.link(target, destination)
             return
         except OSError:
-            raise exc
+            pass
+        if _on_windows():
+            # The two ways this fails on Windows are Developer Mode being off
+            # and the music sitting on a different drive from the library.
+            # Neither is obvious from the error the system gives.
+            raise OSError(
+                f"{exc}. On Windows, linking needs Developer Mode turned on "
+                "(Settings > Privacy & security > For developers), and a hard "
+                "link cannot cross drives. Adding the folder instead plays it "
+                "where it stands and links nothing."
+            ) from exc
+        raise exc
 
 
 def unlink(
