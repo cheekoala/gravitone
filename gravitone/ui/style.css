@@ -419,6 +419,8 @@ table.tracks tbody tr:hover .origin, table.tracks tbody tr.playing .origin { opa
 #panel-settings .card, #panel-settings .hint { max-width: 660px; }
 .field { display: grid; grid-template-columns: 120px 1fr 62px; align-items: center; gap: 12px; margin-bottom: 12px; }
 .field:last-child { margin-bottom: 0; }
+/* display: grid and display: flex outrank the browser's [hidden]. */
+.field[hidden], .switch[hidden] { display: none; }
 .field > span { color: var(--muted); font-size: 12.5px; }
 .field output { font: 11.5px/1 var(--mono); color: var(--text); text-align: right; }
 .field input.value {
@@ -534,6 +536,9 @@ tr.skeleton .sk-line.mid { width: 68%; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 button .spinner { margin-right: 6px; vertical-align: -2px; }
+/* Standing in for an icon, so it has to be exactly the icon's box: any
+   other size moves the label beside it. */
+button .spinner.in-icon { width: 16px; height: 16px; margin: 0; vertical-align: 0; }
 button.busy { opacity: .75; pointer-events: none; }
 
 .working { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12.5px; }

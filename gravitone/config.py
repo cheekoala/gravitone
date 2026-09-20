@@ -92,15 +92,17 @@ def config_path() -> Path:
 class Config:
     """Player settings.
 
-    Gap defaults are deliberately conservative: long enough that the music
-    does not feel wall-to-wall, short enough that a quiet stretch never feels
-    like the player died.
+    The gap defaults are for a game you are playing, not a room you are
+    sitting in: three to seven minutes of nothing between songs, so the
+    music arrives as a thing that happens rather than a thing that is on.
+    Silence by default too - ambience is a folder you have to fill before
+    it can play, and an empty one would just be silence wearing a name.
     """
 
     root: str = ""
-    gap_min: float = 12.0
-    gap_max: float = 45.0
-    ambient_chance: float = 0.65
+    gap_min: float = 180.0
+    gap_max: float = 420.0
+    ambient_chance: float = 0.0
     ambient_min_tail: float = 3.0
     shuffle: bool = True
     volume: int = 70
@@ -165,7 +167,13 @@ class Config:
         if self.gap_min < 0:
             raise ValueError("gap_min must be >= 0")
         if self.gap_max < self.gap_min:
-            raise ValueError("gap_max must be >= gap_min")
+            # Name both numbers: with a default gap_min of three minutes,
+            # "gap_max must be >= gap_min" on its own leaves you guessing
+            # which of the two you need to move.
+            raise ValueError(
+                f"gap_max ({self.gap_max:g}s) must be >= gap_min "
+                f"({self.gap_min:g}s) - set gap_min first, or set both at once"
+            )
         if self.gap_max > MAX_GAP:
             raise ValueError(f"gap_max must be <= {MAX_GAP} seconds (one hour)")
         if not 0.0 <= self.ambient_chance <= 1.0:

@@ -57,13 +57,28 @@
   async function withSpinner(button, work) {
     if (!button) return work();
     const label = button.innerHTML;
+    // Hold the button at the size it already has. Swapping its contents for
+    // a spinner used to resize it on the way in and again on the way out -
+    // two jumps for one press, right under the cursor.
+    const box = button.getBoundingClientRect();
+    button.style.minWidth = `${box.width}px`;
+    button.style.minHeight = `${box.height}px`;
     button.classList.add("busy");
-    button.innerHTML = `<span class="spinner"></span>${button.textContent.trim()}`;
+    const icon = button.querySelector(".icon");
+    if (icon) {
+      // Spin where the icon was, so the words beside it do not move either.
+      const spinner = el("span", "spinner in-icon");
+      icon.replaceWith(spinner);
+    } else {
+      button.innerHTML = `<span class="spinner"></span>${button.textContent.trim()}`;
+    }
     try {
       return await work();
     } finally {
       button.classList.remove("busy");
       button.innerHTML = label;
+      button.style.minWidth = "";
+      button.style.minHeight = "";
     }
   }
 
@@ -472,7 +487,11 @@
     anchor(now, hiddenNow);
 
     $("stat-gap").textContent = next.hidden ? "hidden" : humanGap(config);
-    $("stat-ambient").textContent = `${Math.round(config.ambient_chance * 100)}%`;
+    // Whether the quiet is really quiet belongs here as a word, not as the
+    // percentage panel this used to sit beside.
+    $("stat-gap-note").textContent = config.ambient_chance > 0
+      ? "between songs, some of it ambience"
+      : "of silence between songs";
 
     renderHistory(next.history);
 
@@ -540,6 +559,10 @@
       : `/api/cover?track=${encodeURIComponent(track.path || track.target || "")}`
         + `&t=${encodeURIComponent(TOKEN)}`;
 
+  // The value the picker uses for "make me another one". No playlist can
+  // have it: real ids are hex.
+  const NEW_PLAYLIST = "\u0000new";
+
   function renderPlaylistPicker(next) {
     const picker = $("playlist-select");
     const signature = next.playlists.map((p) => `${p.id}:${p.name}`).join("|");
@@ -551,6 +574,11 @@
         option.textContent = item.name;
         picker.append(option);
       });
+      const divider = document.createElement("hr");
+      const fresh = document.createElement("option");
+      fresh.value = NEW_PLAYLIST;
+      fresh.textContent = "New playlist…";
+      picker.append(divider, fresh);
       picker.dataset.signature = signature;
     }
     if (document.activeElement !== picker) picker.value = next.playlist;
@@ -958,6 +986,10 @@
   };
   // What a slider's whole numbers mean: percent, or tenths of a second.
   const SCALE = { ambient_chance: 100, fade: 10 };
+  // Ambience off is a chance of zero, and the slider does not go that low
+  // any more - the switch above it does that. This is what the slider goes
+  // back to when the switch comes on again.
+  let ambienceWas = 65;
 
   const isGap = (key) => GAPS.includes(key);
   const setReadout = (key, value) => {
@@ -966,14 +998,28 @@
     else node.textContent = SLIDERS[key](value);
   };
 
+  // Everything under the ambience switch is about ambience, so with the
+  // switch off there is nothing under it worth reading.
+  function showAmbienceControls(on) {
+    $("ambient-chance-field").hidden = !on;
+    $("ambient-start-field").hidden = !on;
+  }
+
   function syncSettings(config) {
+    const ambience = config.ambient_chance > 0;
+    if (ambience) ambienceWas = Math.round(config.ambient_chance * 100);
     Object.keys(SLIDERS).forEach((key) => {
       if (document.activeElement === $(`${key}-out`)) return;   // mid-typing
       const raw = config[key] * (SCALE[key] || 1);
-      const value = Math.round(raw);
+      let value = Math.round(raw);
+      // With ambience off the slider shows what turning it back on would
+      // give you, rather than a zero it can no longer reach.
+      if (key === "ambient_chance" && !ambience) value = ambienceWas;
       $(key).value = isGap(key) ? sliderFromGap(value) : value;
       setReadout(key, value);
     });
+    $("ambient_on").checked = ambience;
+    showAmbienceControls(ambience);
     $("shuffle").checked = config.shuffle;
     $("loop").checked = config.loop;
     $("hide_gaps").checked = config.hide_gaps;
@@ -1716,7 +1762,19 @@
     const value = $("path-input").value.trim();
     if (value) browse(value);
   });
-  $("playlist-select").addEventListener("change", (event) => selectPlaylist(event.target.value));
+  $("playlist-select").addEventListener("change", (event) => {
+    if (event.target.value !== NEW_PLAYLIST) {
+      selectPlaylist(event.target.value);
+      return;
+    }
+    // Nothing has been chosen yet, so put the picker back on what is
+    // playing and go where the name gets typed.
+    if (state) event.target.value = state.playlist;
+    showPanel("settings");
+    const box = $("new-playlist-name");
+    box.scrollIntoView({ block: "center" });
+    box.focus();
+  });
   document.querySelectorAll("th[data-sort]").forEach((head) =>
     head.addEventListener("click", () => sortBy(head.dataset.sort)));
   document.querySelectorAll("input.filter").forEach((box) => {
@@ -1872,6 +1930,16 @@
 
   ["shuffle", "loop", "hide_gaps", "ambient_random_start"].forEach((key) =>
     $(key).addEventListener("change", () => call("config", { [key]: $(key).checked })));
+
+  // The switch and the slider are two views of one number, and zero is off.
+  $("ambient_on").addEventListener("change", async () => {
+    const on = $("ambient_on").checked;
+    showAmbienceControls(on);
+    await call("config", { ambient_chance: on ? ambienceWas / 100 : 0 });
+    if (on && state && state.counts.ambient === 0) {
+      toast("Nothing in the ambient folder yet — gaps stay silent until there is", true);
+    }
+  });
 
   document.addEventListener("keydown", (event) => {
     if (event.target.matches("input, textarea")) {

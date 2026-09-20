@@ -23,9 +23,11 @@ coming off it.
   in later.
   Nothing is ever copied.
 - **A separate `ambient` folder and ambient folders** for loops and atmosphere.
-- **Random gaps with sane defaults** — 12–45 s, 65 % of them ambient, the rest
-  silence — tunable anywhere from none to a full hour, and hideable if you
-  would rather not know how long the quiet lasts.
+- **Random gaps with sane defaults** — 3–7 minutes of silence between songs,
+  so the music arrives as a thing that happens rather than a thing that is on.
+  Tunable anywhere from none to a full hour, and hideable if you would rather
+  not know how long the quiet lasts. Switch ambience on and a share of those
+  gaps become rain, wind or room tone instead.
 - **Listening together, offline.** A 32-character code and a shared clock put
   two machines on the same evening, with nothing running between them.
 - **A tiny control panel** (`gravitone ui`) that runs in your browser, or on
@@ -213,9 +215,10 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
 | --- | --- |
 | ![The track table, sorted by album, with one row playing](docs/ui-library.png) | ![Settings: gaps, levels, fade, playlists](docs/ui-settings.png) |
 | ![The file browser, with a folder opened where it stands](docs/ui-browse.png) | ![Adding: a whole folder, or just the files in it](docs/ui-add.png) |
-| ![Now playing, with Remove armed and its confirm dropped below](docs/ui-now.png) | |
+| ![Now playing: the cover, the clock, and how long the gaps run](docs/ui-now.png) | |
 
-- **Top bar** — the playlist selector; switching it switches what plays. The
+- **Top bar** — the playlist selector; switching it switches what plays, and
+  its last entry, **New playlist…**, takes you to where one gets named. The
   button says what pressing it does — **Play**, then **Stop** — and a green
   **Live** badge next to it says something is sounding. The button is never
   the status: you should not have to press the word "Live" to make things
@@ -241,8 +244,10 @@ Electron, no build step, no dependencies, nothing loaded from the internet.
   files** (just the files in it now, as symlinks).
 - **Config** — gaps, levels, fade, shuffle, loop, your playlists (rename,
   delete, create), this playlist's folders and removed tracks, and
-  export/import. Changes save immediately and take effect from the next gap;
-  no need to restart playback.
+  export/import. **Ambience** is a switch here, with the chance slider folded
+  away behind it: a slider at 0 % means the same thing, but off is not a
+  number anybody wants to set. Changes save immediately and take effect from
+  the next gap; no need to restart playback.
 
 On a wide screen the artwork is given room: the cover in Now is 288px and the
 table's thumbnails are 68px, dropping back to 148/34 on a tablet and 96/34 on
@@ -664,8 +669,8 @@ smear of rain sounds like a mistake.
 
 | Setting | Default | |
 | --- | --- | --- |
-| `gap_min` / `gap_max` | `12` / `45` | gap length range, seconds — up to `3600` (an hour) |
-| `ambient_chance` | `0.65` | share of gaps that get ambience |
+| `gap_min` / `gap_max` | `180` / `420` | gap length range, seconds — up to `3600` (an hour) |
+| `ambient_chance` | `0.0` | share of gaps that get ambience; `0` is silence throughout, which is what the **Ambience** switch in Settings turns off |
 | `ambient_min_tail` | `3.0` | shortest gap worth filling with ambience |
 | `ambient_random_start` | `true` | drop into an ambient track at a random point |
 | `hide_gaps` | `false` | hidden mode: never show how long a gap runs |

@@ -121,17 +121,12 @@
           </div>
         </div>
 
-        <div class="grid-2">
-          <div class="card stat">
-            <div class="kicker">Gap range</div>
-            <div class="stat-value" id="stat-gap">—</div>
-            <div class="stat-note">between songs</div>
-          </div>
-          <div class="card stat">
-            <div class="kicker">Ambience</div>
-            <div class="stat-value" id="stat-ambient">—</div>
-            <div class="stat-note">of gaps, rest is silence</div>
-          </div>
+        <!-- How much of the gap is ambience lives in Settings, where you
+             change it; on this panel it was a number nobody ever read. -->
+        <div class="card stat">
+          <div class="kicker">Gap range</div>
+          <div class="stat-value" id="stat-gap">—</div>
+          <div class="stat-note" id="stat-gap-note">between songs</div>
         </div>
 
         <div class="card">
@@ -351,10 +346,13 @@
           <label class="field"><span>Longest gap</span>
             <input type="range" id="gap_max" min="0" max="1000" step="1">
             <input class="value" type="text" id="gap_max-out" inputmode="numeric" spellcheck="false"></label>
-          <label class="field"><span>Ambience chance</span>
-            <input type="range" id="ambient_chance" min="0" max="100" step="5"><output id="ambient_chance-out"></output></label>
+          <!-- A slider at 0% says the same thing, but a switch is what a
+               person reaches for to turn something off. -->
+          <label class="switch"><input type="checkbox" id="ambient_on"><span class="track"></span>Fill some gaps with ambience</label>
+          <label class="field" id="ambient-chance-field"><span>Ambience chance</span>
+            <input type="range" id="ambient_chance" min="5" max="100" step="5"><output id="ambient_chance-out"></output></label>
           <label class="switch"><input type="checkbox" id="hide_gaps"><span class="track"></span>Hidden mode — never show how long a gap lasts</label>
-          <label class="switch"><input type="checkbox" id="ambient_random_start"><span class="track"></span>Start ambient tracks at a random point</label>
+          <label class="switch" id="ambient-start-field"><input type="checkbox" id="ambient_random_start"><span class="track"></span>Start ambient tracks at a random point</label>
         </div>
         <div class="card">
           <div class="kicker">Levels</div>
