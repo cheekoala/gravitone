@@ -28,11 +28,29 @@ DOCS = ROOT / "docs"
 WINDOW = {"width": 1180, "height": 760}
 SCALE = 2
 
-TRACKS = [
-    ("01 Hollow Kingdom.mp3", "Hollow Kingdom", "Ori Sallows", 220, ("0x1d2b4f", "0x7fd1ff")),
-    ("02 The Long Dark.mp3", "The Long Dark", "Ori Sallows", 196, ("0x3a1f4d", "0xffb37f")),
-    ("03 Second Wind.mp3", "Second Wind", "Marta Vey", 243, ("0x14332b", "0x9cf0b0")),
+# Placeholder music. Nothing here is anybody's real work: the files are
+# sine tones and the covers are three rectangles. They exist so the
+# pictures show a library with shape to it rather than three identical
+# rows of "unknown".
+ALBUMS = [
+    ("Deep Field", "Ori Sallows", ("0x1d2b4f", "0x7fd1ff"), [
+        ("Hollow Kingdom", 220), ("The Long Dark", 196),
+        ("Ninth Gate", 254), ("Slow Orbit", 178),
+    ]),
+    ("Ashfall", "Marta Vey", ("0x3a1f4d", "0xffb37f"), [
+        ("Second Wind", 243), ("Cinder Road", 201),
+        ("Quarry Light", 167), ("Ashfall", 289),
+    ]),
+    ("Greenhouse", "Pell & Auber", ("0x14332b", "0x9cf0b0"), [
+        ("Glasshouse", 211), ("Rooted", 188),
+        ("Understory", 232), ("Late Frost", 174),
+    ]),
+    ("Signal Hill", "Rue Tamm", ("0x3d2417", "0xffd79a"), [
+        ("Signal Hill", 265), ("Dead Air", 149),
+        ("Repeater", 207), ("Carrier Wave", 193),
+    ]),
 ]
+
 
 
 def chromium() -> str:
@@ -46,9 +64,9 @@ def chromium() -> str:
 
 
 def make_album(into: Path) -> None:
-    """Three tracks with covers, so the pictures show a library, not blanks."""
-    for name, title, artist, seconds, (bg, fg) in TRACKS:
-        art = into / f"{name}.png"
+    """Tracks with covers, so the pictures show a library, not blank slots."""
+    for album, artist, (bg, fg), tracks in ALBUMS:
+        art = into / f"{album}.png"
         subprocess.run([
             "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={bg}:s=600x600",
             "-vf", (f"drawbox=x=150:y=150:w=300:h=300:color={fg}@0.9:t=fill,"
@@ -56,15 +74,17 @@ def make_album(into: Path) -> None:
                     f"drawbox=x=255:y=255:w=90:h=90:color={fg}@0.9:t=fill"),
             "-frames:v", "1", str(art),
         ], check=True)
-        subprocess.run([
-            "ffmpeg", "-v", "error", "-y",
-            "-f", "lavfi", "-i", f"sine=frequency=220:duration={seconds}",
-            "-i", str(art), "-map", "0:a", "-map", "1:v",
-            "-c:a", "libmp3lame", "-q:a", "9", "-c:v", "copy",
-            "-id3v2_version", "3", "-disposition:v", "attached_pic",
-            "-metadata", f"title={title}", "-metadata", f"artist={artist}",
-            "-metadata", "album=Deep Field", str(into / name),
-        ], check=True)
+        for number, (title, seconds) in enumerate(tracks, start=1):
+            name = f"{number:02d} {title}.mp3"
+            subprocess.run([
+                "ffmpeg", "-v", "error", "-y",
+                "-f", "lavfi", "-i", f"sine=frequency=220:duration={seconds}",
+                "-i", str(art), "-map", "0:a", "-map", "1:v",
+                "-c:a", "libmp3lame", "-q:a", "9", "-c:v", "copy",
+                "-id3v2_version", "3", "-disposition:v", "attached_pic",
+                "-metadata", f"title={title}", "-metadata", f"artist={artist}",
+                "-metadata", f"album={album}", str(into / name),
+            ], check=True)
         art.unlink()
 
 
@@ -93,7 +113,7 @@ def main(wanted: set) -> int:
     config = Config(root=str(home / "custom soundtrack"))
     store = playlists.Store()
     current = store.current()
-    current.name = "Hollow Kingdom"
+    current.name = "Survival run"
     library.init(config, current)
     library.link(config, sorted(album.iterdir()), playlist=current)
     library.add_source(config, weather, section="ambient", playlist=current)
@@ -151,20 +171,36 @@ def main(wanted: set) -> int:
                         shot += 1
                         page.wait_for_timeout(every)
 
-                run(14)                                    # a song playing
-                session._on_event(engine.Event(
-                    "ambient", path=config.ambient_dir / "rain.mp3", duration=26.0))
-                run(10)                                    # the gap after it
-                session._on_event(engine.Event(
-                    "track", path=config.music_dir / names[2]))
-                session._now.duration = 243.0
-                run(14)                                    # and the next one
+                def now_playing(kind, name=None, seconds=0.0):
+                    path = config.music_dir / name if name else None
+                    session._on_event(engine.Event(kind, path=path, duration=seconds))
+                    if path is not None:
+                        session._now.duration = seconds
+
+                # The quiet first. It is most of what this thing does and it
+                # is the part nobody expects, so it opens.
+                page.click('.rail-btn[data-panel="now"]')
+                now_playing("silence", seconds=268.0)
+                run(12)
+                # Then a song, with its cover and its clock.
+                now_playing("track", names[1], 196.0)
+                run(13)
+                # What is in the playlist.
+                page.click('.rail-btn[data-panel="music"]')
+                page.wait_for_selector("#music-list tr:not(.skeleton)", timeout=20000)
+                page.wait_for_timeout(400)
+                run(12)
+                # And what you can turn.
+                page.click('.rail-btn[data-panel="settings"]')
+                page.wait_for_timeout(400)
+                run(12)
+                page.click('.rail-btn[data-panel="now"]')
+                run(6)
                 subprocess.run([
                     "ffmpeg", "-v", "error", "-y", "-framerate", "5",
                     "-i", str(frames / "%04d.png"),
-                    "-vf", (f"crop={WINDOW['width'] * SCALE}:{632 * SCALE}:0:0,"
-                            "scale=900:-1:flags=lanczos,split[a][b];"
-                            "[a]palettegen=max_colors=96[p];"
+                    "-vf", ("scale=900:-1:flags=lanczos,split[a][b];"
+                            "[a]palettegen=max_colors=128[p];"
                             "[b][p]paletteuse=dither=bayer:bayer_scale=3"),
                     "-loop", "0", str(DOCS / "demo.gif"),
                 ], check=True)

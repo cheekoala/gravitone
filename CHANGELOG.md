@@ -19,8 +19,11 @@ Defaults and small edges, from watching somebody else use it.
 - **Buttons hold their size while they work.** Skip and Remove swapped their
   icon for a differently shaped spinner, so they shrank on the click and grew
   back on the answer — two jumps under the cursor for one press.
-- `make docs` redraws the README's pictures (`tools/docshots.py`), so they
-  cannot quietly drift from the thing they show.
+- The README has been rewritten to be plainer and shorter. The demo now
+  runs through silence, a song, the playlist and the settings, from a
+  16 track placeholder library. `make docs` redraws all of it
+  (`tools/docshots.py`), so the pictures cannot quietly drift from the
+  thing they show.
 - A gap that crosses the other one now says which of the two to move.
 
 ## 1.0.0 — first release
