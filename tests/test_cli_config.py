@@ -23,6 +23,14 @@ def test_defaults_are_sane():
     assert cfg.ambient_volume <= cfg.volume  # ambience sits under the music
 
 
+def test_out_of_the_box_the_gaps_are_long_and_silent():
+    """Music behind a game, not music on in a room: minutes of nothing, and
+    nothing means nothing until somebody puts something in ambient/."""
+    cfg = Config()
+    assert (cfg.gap_min, cfg.gap_max) == (180.0, 420.0)
+    assert cfg.ambient_chance == 0.0
+
+
 def test_root_is_the_custom_soundtrack_folder(env):
     cfg = Config()
     assert cfg.root_path.name == "custom soundtrack"
@@ -43,12 +51,20 @@ def test_validate_rejects_bad_values():
 
 def test_round_trip_save_load(env, tmp_path):
     cfg = Config()
+    config_module.set_value(cfg, "gap_min", "30")
     config_module.set_value(cfg, "gap_max", "90")
     config_module.set_value(cfg, "shuffle", "off")
     path = config_module.save(cfg)
     assert json.loads(path.read_text())["gap_max"] == 90.0
     loaded = config_module.load()
     assert loaded.gap_max == 90.0 and loaded.shuffle is False
+
+
+def test_a_gap_that_crosses_the_other_says_which_one_to_move(env):
+    cfg = Config()
+    with pytest.raises(ValueError) as complaint:
+        config_module.set_value(cfg, "gap_max", "90")
+    assert "gap_min" in str(complaint.value) and "180s" in str(complaint.value)
 
 
 def test_unknown_config_key_rejected(env):

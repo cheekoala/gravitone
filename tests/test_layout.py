@@ -912,3 +912,136 @@ def test_a_playing_library_shows_no_notice(served_playing):
             assert page.is_hidden("#notice")
         finally:
             browser.close()
+
+
+def _width(page, selector):
+    return page.evaluate(
+        f"() => document.querySelector({selector!r}).getBoundingClientRect().width"
+    )
+
+
+@pytest.mark.parametrize("button", ["#skip", "#ban"])
+def test_a_button_is_the_same_size_while_it_works(served_playing, button):
+    """The spinner used to be a different shape from the icon it replaced, so
+    the button shrank on the click and grew back on the answer - two jumps
+    under the cursor for one press."""
+    url, _ = served_playing
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(url)
+            page.wait_for_selector(f"{button}:not([disabled])", timeout=15000)
+            before = _width(page, button)
+
+            if button == "#ban":
+                page.click("#ban")                     # arms it
+                page.wait_for_selector("#ban-confirm.open", timeout=5000)
+                page.click("#ban-confirm")
+            else:
+                page.click(button)
+
+            # Nothing else is going to start playing here, so the spinner
+            # runs its full course - long enough to be measured.
+            page.wait_for_selector(f"{button}.busy", timeout=5000)
+            during = _width(page, button)
+            assert abs(during - before) < 0.5, (
+                f"{button} was {before}px and became {during}px while working"
+            )
+
+            page.wait_for_selector(f"{button}:not(.busy)", timeout=15000)
+            page.wait_for_timeout(300)
+            after = _width(page, button)
+            assert abs(after - before) < 0.5, (
+                f"{button} came back {after}px, having been {before}px"
+            )
+        finally:
+            browser.close()
+
+
+def test_the_now_panel_does_not_carry_the_ambience_percentage(served):
+    """It was a number nobody read, beside the one setting it describes -
+    which lives in Settings, where you change it."""
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.wait_for_selector("#stat-gap", timeout=15000)
+            assert page.query_selector("#stat-ambient") is None
+            assert "ambience" not in page.inner_text("#panel-now").lower()
+            # The gap card is still there, and now says what the quiet is.
+            assert "silence" in page.inner_text("#stat-gap-note").lower()
+            # And the setting itself is still reachable.
+            page.click('.rail-btn[data-panel="settings"]')
+            assert page.is_visible("#ambient_on")
+        finally:
+            browser.close()
+
+
+def test_ambience_is_a_switch_and_the_slider_hides_behind_it(served):
+    """A slider at 0 % says the same thing, but off is not a number anybody
+    wants to set."""
+    switch = "label.switch:has(#ambient_on)"
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.wait_for_selector("#ambient_on", state="attached", timeout=15000)
+            page.click('.rail-btn[data-panel="settings"]')
+
+            # Off out of the box: no slider, nothing at 0 % to puzzle over.
+            assert page.is_checked("#ambient_on") is False
+            assert page.is_hidden("#ambient-chance-field")
+
+            page.click(switch)
+            page.wait_for_selector("#ambient-chance-field:not([hidden])", timeout=5000)
+            assert page.is_checked("#ambient_on")
+            assert int(page.input_value("#ambient_chance")) > 0
+
+            # The server was told, not just the page: a reload comes back on.
+            page.wait_for_timeout(600)
+            page.reload()
+            page.wait_for_selector("#ambient_on", state="attached", timeout=15000)
+            page.wait_for_function(
+                "() => document.getElementById('ambient_on').checked", timeout=15000)
+            page.click('.rail-btn[data-panel="settings"]')
+            assert page.is_visible("#ambient-chance-field")
+
+            page.click(switch)
+            page.wait_for_selector(
+                "#ambient-chance-field", state="hidden", timeout=5000)
+            page.wait_for_timeout(600)
+            page.reload()
+            page.wait_for_selector("#ambient_on", state="attached", timeout=15000)
+            page.wait_for_timeout(1200)
+            assert page.is_checked("#ambient_on") is False
+        finally:
+            browser.close()
+
+
+def test_the_playlist_picker_offers_a_new_one(served):
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROME)
+        page = browser.new_page(viewport={"width": 1180, "height": 900})
+        try:
+            page.goto(served)
+            page.wait_for_function(
+                "() => document.querySelectorAll('#playlist-select option').length > 1",
+                timeout=15000,
+            )
+            labels = page.eval_on_selector_all(
+                "#playlist-select option", "nodes => nodes.map((n) => n.textContent)")
+            assert labels[-1] == "New playlist\u2026"
+
+            before = page.input_value("#playlist-select")
+            page.select_option("#playlist-select", index=len(labels) - 1)
+
+            # It is not a playlist, so nothing switches; it takes you to
+            # where a playlist gets named.
+            page.wait_for_selector("#panel-settings.active", timeout=5000)
+            assert page.evaluate("() => document.activeElement.id") == "new-playlist-name"
+            assert page.input_value("#playlist-select") == before
+        finally:
+            browser.close()

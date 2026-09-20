@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.0
+
+Defaults and small edges, from watching somebody else use it.
+
+- **Gaps are 3–7 minutes of silence out of the box**, where they were
+  12–45 seconds of mostly ambience. Music behind a game should arrive as a
+  thing that happens, not a thing that is on. Existing settings are left
+  alone; this is what a fresh install starts with.
+- **Ambience is a switch**, in Settings, with the chance slider and the
+  random-start option folded away behind it. A slider at 0 % meant the same
+  thing, but off is not a number anybody wants to set.
+- **The ambience percentage has left the Now panel.** It was a read-out of a
+  setting, sat next to nothing you could do about it. The gap card stays and
+  now says what the quiet actually is.
+- **New playlist…** is the last entry in the playlist dropdown, and takes you
+  to where one gets named.
+- **Buttons hold their size while they work.** Skip and Remove swapped their
+  icon for a differently shaped spinner, so they shrank on the click and grew
+  back on the answer — two jumps under the cursor for one press.
+- The README has been rewritten to be plainer and shorter. The demo now
+  runs through silence, a song, the playlist and the settings, from a
+  16 track placeholder library. `make docs` redraws all of it
+  (`tools/docshots.py`), so the pictures cannot quietly drift from the
+  thing they show.
+- A gap that crosses the other one now says which of the two to move.
+
 ## 1.0.0 — first release
 
 The first version worth handing to somebody else. It was called `bgst` while
