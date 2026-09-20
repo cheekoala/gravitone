@@ -2,19 +2,17 @@
 
 # Gravitone
 
-Plays music you already own behind a game. Shuffled, with a long random gap
-after each song. That is the whole idea.
+Plays music you already own behind a game. Shuffled, with a random gap
+after each song. That's it.
 
 <br clear="left">
 
-The gap is the part people get wrong. A soundtrack that never stops is just
-a radio, and after twenty minutes you stop hearing it. Three to seven
-minutes of nothing, then a song, and the song is an event again. Set the
-gaps to zero if you disagree; it is a number in a config file.
+There's not enough music to fill a continuous soundtrack if you play 
+hundreds of hours. Some games already offer a soundtrack player with random
+silence intervals, but now you can use this as a standalone soundtrack 
+player.
 
-A graviton is the particle that would carry gravity, if anyone ever catches
-one. A tone is what you would hear if it arrived. The mark is a mass with
-the waves coming off it.
+
 
 ![Silence, then a song, then the playlist and the settings](docs/demo.gif)
 
